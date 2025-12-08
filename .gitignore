@@ -1,0 +1,11 @@
+# Python related files
+__pycache__/
+*.pyc
+
+# Operating system files
+.DS_Store
+
+# Credentials and Downloaded Content (DO NOT UPLOAD THESE!)
+gkey.json
+downloads/
+get_ids.py
