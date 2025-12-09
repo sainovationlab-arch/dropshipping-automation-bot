@@ -28,24 +28,24 @@ def main():
             print("❌ Row 2 incomplete.")
             return
 
-        # DATA MAPPING (તમારી શીટ મુજબ)
-        account_name = str(row_values[2]).strip()   # Col C: Account Name (e.g., Pearl Verse)
+        # DATA MAPPING
+        account_name = str(row_values[2]).strip()   # Col C: Account Name
         platform = str(row_values[3]).strip().lower() # Col D
-        media_url = str(row_values[4]).strip()      # Col E (Video/Image URL)
+        media_url = str(row_values[4]).strip()      # Col E
         caption = str(row_values[5]).strip()        # Col F
-        status = str(row_values[8]).strip().upper() # Col I (Index 8)
+        
+        # Status Handling
+        if len(row_values) > 8:
+            status = str(row_values[8]).strip().upper() # Col I
+        else:
+            status = "UNKNOWN"
 
         # Check PENDING status
         if "PENDING" not in status:
             print(f"😴 Status is '{status}', skipping.")
             return
 
-        # Check Platform (Facebook Only for this test)
-        if "facebook" not in platform:
-            print("⚠️ This test is for Facebook. Please check Platform column.")
-            return
-
-        print(f"🎯 Preparing to post to Facebook Page: {account_name}")
+        print(f"🎯 Target Page from Sheet: '{account_name}'") # Debug print
 
         # 3. FACEBOOK API: GET PAGE ACCESS TOKEN
         user_access_token = os.environ.get('FB_ACCESS_TOKEN')
@@ -53,33 +53,36 @@ def main():
             print("❌ FB Token Missing")
             return
 
-        # બધા પેજનું લિસ્ટ મંગાવો
+        # Fetch Pages
         resp = requests.get(f"https://graph.facebook.com/v18.0/me/accounts?access_token={user_access_token}")
         if resp.status_code != 200:
-            print(f"❌ Failed to fetch pages: {resp.text}")
+            print(f"❌ Failed to fetch pages. API Error: {resp.text}")
             return
         
         pages_data = resp.json().get('data', [])
+        
+        # 👇 DEBUGGING: Available Pages Print કરો
+        available_pages = [p.get('name') for p in pages_data]
+        print(f"👀 FOUND PAGES IN FACEBOOK: {available_pages}")
+        
         page_token = None
         page_id = None
 
-        # સાચું પેજ શોધો (Pearl Verse)
+        # Find Page (Case Insensitive Check)
         for page in pages_data:
-            if page.get('name') == account_name:
+            if page.get('name').strip().lower() == account_name.lower():
                 page_token = page.get('access_token')
                 page_id = page.get('id')
+                print(f"✅ Match Found! ID: {page_id}")
                 break
         
         if not page_token:
-            print(f"❌ Could not find page: '{account_name}' in your connected accounts.")
+            print(f"❌ ERROR: Could not find '{account_name}' in the list above.")
             return
 
-        print(f"✅ Found Page ID: {page_id}")
-
         # 4. PUBLISH POST (REAL)
-        print("📤 Uploading to Facebook...")
+        print(f"📤 Uploading to {account_name}...")
         
-        # જો URL માં .mp4 હોય તો Video, નહીંતર Photo ગણશે
         if ".mp4" in media_url or "video" in media_url:
             post_url = f"https://graph.facebook.com/v18.0/{page_id}/videos"
             payload = {'file_url': media_url, 'description': caption, 'access_token': page_token}
@@ -87,16 +90,21 @@ def main():
             post_url = f"https://graph.facebook.com/v18.0/{page_id}/photos"
             payload = {'url': media_url, 'caption': caption, 'access_token': page_token}
 
-        # API Call (The Real Attack!)
         post_resp = requests.post(post_url, data=payload)
         
         if post_resp.status_code == 200:
             post_id = post_resp.json().get('id')
-            print(f"🎉 SUCCESS! Posted to FB. ID: {post_id}")
+            # Construct Link
+            if "instagram" in platform:
+                 post_link = f"https://instagram.com/p/{post_id}" # Simplification
+            else:
+                 post_link = f"https://facebook.com/{post_id}"
+
+            print(f"🎉 SUCCESS! Posted. ID: {post_id}")
             
             # 5. UPDATE SHEET
-            sheet.update_cell(2, 9, "DONE") # Status -> DONE
-            sheet.update_cell(2, 10, f"Posted! ID: {post_id}") # Scheduled Time column update as Log
+            sheet.update_cell(2, 9, "DONE") 
+            sheet.update_cell(2, 10, post_link) # Save link in Scheduled Time/Log col
         else:
             print(f"❌ Upload Failed: {post_resp.text}")
             sheet.update_cell(2, 9, "ERROR")
