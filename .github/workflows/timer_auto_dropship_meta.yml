@@ -1,0 +1,30 @@
+name: Auto Dropship Meta Timer (V2)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # દર કલાકે 15 મિનિટે ચાલશે
+    - cron: '15 * * * *' 
+
+jobs:
+  run_bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.x'
+
+      - name: Install Libraries
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Run Auto Dropship Meta Bot
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }} 
+        # અહીં આપણે આપણી નવી ફાઈલનું નામ લખ્યું છે
+        run: python auto_dropship_meta.py
