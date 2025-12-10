@@ -2,23 +2,19 @@ import os
 import json
 import requests
 import gspread
+import time  # <--- આ નવું હથિયાર છે (Time)
 from oauth2client.service_account import ServiceAccountCredentials
 
 # ---------------- CONFIGURATION ---------------- #
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
-# 🔥 FIX: આ ID આપણે શોધેલું સાચું ID છે (Pearl Verse)
-FIXED_INSTAGRAM_ID = "17841479516066757"
+FIXED_INSTAGRAM_ID = "17841479516066757" # Pearl Verse ID
 SHEET_NAME = "Dropshipping_Sheet"
 
 def get_google_sheet_client():
-    # 🔥 MAZOR FIX: અહીં નામ સુધાર્યું છે! (GCP_CREDS -> GCP_CREDENTIALS)
-    # હવે આ તમારા GitHub Secret સાથે 100% મેચ થશે.
     creds_json = os.environ.get("GCP_CREDENTIALS") 
-    
     if not creds_json:
-        print("❌ CRITICAL ERROR: 'GCP_CREDENTIALS' secret is MISSING in GitHub!")
+        print("❌ CRITICAL ERROR: 'GCP_CREDENTIALS' secret is MISSING!")
         return None
-    
     try:
         creds_dict = json.loads(creds_json)
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -26,23 +22,22 @@ def get_google_sheet_client():
         client = gspread.authorize(creds)
         return client
     except Exception as e:
-        print(f"❌ JSON ERROR: Check your GCP_CREDENTIALS content. {e}")
+        print(f"❌ JSON ERROR: {e}")
         return None
 
 def post_to_instagram():
-    print("🚀 STARTING FINAL INSTAGRAM ENGINE...")
+    print("🚀 ACTIVATING UNIVERSAL DROPSHIP ENGINE...")
     
     # --- STEP 1: CONNECT TO SHEET ---
     client = get_google_sheet_client()
-    if not client:
-        return
+    if not client: return
 
     try:
         sheet = client.open(SHEET_NAME).sheet1
         records = sheet.get_all_records()
         print("✅ Connected to Google Sheet Successfully.")
     except Exception as e:
-        print(f"❌ SHEET ERROR: Could not find '{SHEET_NAME}'. Check spelling! Error: {e}")
+        print(f"❌ SHEET ERROR: Could not find '{SHEET_NAME}'. {e}")
         return
 
     # --- STEP 2: FIND PENDING POST ---
@@ -62,21 +57,11 @@ def post_to_instagram():
 
     print(f"📝 Processing Row {row_index}: {row_data.get('Caption')}")
     
-    # --- STEP 3: CHECK IMAGE LINK ---
+    # --- STEP 3: UPLOAD ---
     image_url = row_data.get("Video URL", "")
     caption = row_data.get("Caption", "")
-
-    # ⚠️ મહત્વનું: ibb.co લિંક ઇન્સ્ટાગ્રામ પર ચાલતી નથી.
-    if "ibb.co" in image_url:
-        print(f"❌ BAD LINK: {image_url}")
-        print("⚠️ Please use direct links (ending in .jpg/.png) like Wikimedia or Imgur direct link.")
-        sheet.update_cell(row_index, 9, "ERROR_BAD_LINK")
-        return
-
-    # --- STEP 4: UPLOAD & PUBLISH ---
     target_id = FIXED_INSTAGRAM_ID
     
-    # Upload Container
     post_url = f"https://graph.facebook.com/v19.0/{target_id}/media"
     payload = {
         "image_url": image_url,
@@ -91,10 +76,16 @@ def post_to_instagram():
         creation_id = response.json().get("id")
         print(f"✅ Container Ready! ID: {creation_id}")
         
-        # Publish Container
-        pub_url = f"https://graph.facebook.com/v19.0/{target_id}/media_publish"
+        # 🔥 CRITICAL STEP: WAIT FOR PROCESSING 🔥
+        print("⏳ Waiting 30 seconds for Instagram to process the image...")
+        time.sleep(30) # રોબોટ હવે 30 સેકન્ડ આરામ કરશે
+        
+        # --- STEP 4: PUBLISH ---
+        publish_url = f"https://graph.facebook.com/v19.0/{target_id}/media_publish"
         pub_payload = {"creation_id": creation_id, "access_token": FB_ACCESS_TOKEN}
-        pub_res = requests.post(pub_url, data=pub_payload)
+        
+        print("🚀 Publishing now...")
+        pub_res = requests.post(publish_url, data=pub_payload)
         
         if pub_res.status_code == 200:
             print("🏆 VICTORY! POST IS LIVE ON INSTAGRAM! 🥳")
