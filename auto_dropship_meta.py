@@ -2,20 +2,18 @@ import os
 import requests
 
 # ---------------- CONFIGURATION ---------------- #
-# ટોકન ગિટહબના ખજાનામાંથી આવશે
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 🔥 FIX NO. 1: DIRECT INSTAGRAM ID (NO SEARCHING)
-# આ ID આપણે તમારા લોગમાંથી શોધ્યું છે, જે 100% સાચું છે.
+# 🔥 DIRECT ID (This is 100% Correct)
 TARGET_IG_ID = "17841479516066757" 
 
 def post_to_instagram():
-    print("🚀 STARTING DIRECT POST INJECTION...")
+    print("🚀 STARTING DIRECT POST INJECTION...")  # <-- આ લાઈન આવવી જોઈએ!
 
-    # 🔥 FIX NO. 2: DIRECT IMAGE LINK (BYPASSING GOOGLE SHEET)
-    # આપણે શીટમાંથી વાંચવું જ નથી, સીધી સાચી લિંક અહીં આપી દઈએ.
+    # 🔥 DIRECT IMAGE LINK (Wikipedia Link - 100% Working)
     image_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b6/Image_created_with_a_mobile_phone.png/640px-Image_created_with_a_mobile_phone.png"
-    caption = "System Success! This is a direct automated post. #PearlVerse #Victory"
+    
+    caption = "Final Victory Post! System is working perfectly. #PearlVerse #Success"
 
     print(f"📸 Image to Upload: {image_url}")
     print(f"🎯 Target Account ID: {TARGET_IG_ID}")
@@ -47,12 +45,10 @@ def post_to_instagram():
         
         if pub_response.status_code == 200:
             print("🏆 VICTORY! POST PUBLISHED SUCCESSFULLY! 🥳")
-            print("👉 Check your Instagram now!")
         else:
             print(f"❌ Publish Failed: {pub_response.text}")
     else:
         print(f"❌ Upload Failed: {response.text}")
-        print("⚠️ NOTE: If this fails, check your Token permissions again.")
 
 if __name__ == "__main__":
     post_to_instagram()
