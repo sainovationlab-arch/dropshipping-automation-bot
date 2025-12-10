@@ -2,13 +2,25 @@ import os
 import json
 import requests
 import gspread
-import time  # <--- આ નવું હથિયાર છે (Time)
+import time
 from oauth2client.service_account import ServiceAccountCredentials
 
 # ---------------- CONFIGURATION ---------------- #
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
-FIXED_INSTAGRAM_ID = "17841479516066757" # Pearl Verse ID
 SHEET_NAME = "Dropshipping_Sheet"
+
+# 🔥 MASTER ACCOUNT DICTIONARY (તમારા સામ્રાજ્યનો નકશો)
+# નામ એક્ઝેટ Google Sheet જેવા જ હોવા જોઈએ.
+ACCOUNTS = {
+    "Luxivibe": "17841478140648372",
+    "Urban Glint": "17841479492205083",
+    "Opus Elite": "17841479493645419",
+    "Royal Nexus": "17841479056452004",
+    "Grand Orbit": "17841479516066757",
+    "Pearl Verse": "17841478822408000",
+    "Diamond Dice": "17841478369307404",
+    # "Emerald Edge": "AHI_ID_NAKHO" <--- આનું ID મળ્યું નથી, મળે એટલે અહીં નાખી દેજો.
+}
 
 def get_google_sheet_client():
     creds_json = os.environ.get("GCP_CREDENTIALS") 
@@ -26,7 +38,7 @@ def get_google_sheet_client():
         return None
 
 def post_to_instagram():
-    print("🚀 ACTIVATING UNIVERSAL DROPSHIP ENGINE...")
+    print("🚀 ACTIVATING MASTER DROPSHIP ENGINE (MULTI-ACCOUNT)...")
     
     # --- STEP 1: CONNECT TO SHEET ---
     client = get_google_sheet_client()
@@ -52,15 +64,29 @@ def post_to_instagram():
             break
     
     if not row_data:
-        print("💤 No 'PENDING' posts found via Google Sheet.")
+        print("💤 No 'PENDING' posts found. System Sleeping.")
         return
 
-    print(f"📝 Processing Row {row_index}: {row_data.get('Caption')}")
-    
-    # --- STEP 3: UPLOAD ---
-    image_url = row_data.get("Video URL", "")
+    # --- STEP 3: IDENTIFY ACCOUNT ---
+    # શીટમાંથી નામ વાંચો (જેમ કે "Luxivibe")
+    account_name = str(row_data.get("Account Name", "")).strip()
     caption = row_data.get("Caption", "")
-    target_id = FIXED_INSTAGRAM_ID
+    
+    print(f"📝 Found Order for: {account_name}")
+    
+    # ડિક્શનરીમાંથી ID શોધો
+    target_id = ACCOUNTS.get(account_name)
+    
+    if not target_id:
+        print(f"❌ ERROR: Account '{account_name}' not found in code dictionary!")
+        print("👉 Make sure the name in Sheet matches exactly with the code (Spelling check).")
+        sheet.update_cell(row_index, 9, "ERROR_WRONG_NAME")
+        return
+
+    print(f"🎯 Target ID Found: {target_id}")
+
+    # --- STEP 4: UPLOAD ---
+    image_url = row_data.get("Video URL", "")
     
     post_url = f"https://graph.facebook.com/v19.0/{target_id}/media"
     payload = {
@@ -69,18 +95,18 @@ def post_to_instagram():
         "access_token": FB_ACCESS_TOKEN
     }
 
-    print("📤 Uploading to Instagram...")
+    print(f"📤 Uploading to {account_name}...")
     response = requests.post(post_url, data=payload)
     
     if response.status_code == 200:
         creation_id = response.json().get("id")
         print(f"✅ Container Ready! ID: {creation_id}")
         
-        # 🔥 CRITICAL STEP: WAIT FOR PROCESSING 🔥
-        print("⏳ Waiting 30 seconds for Instagram to process the image...")
-        time.sleep(30) # રોબોટ હવે 30 સેકન્ડ આરામ કરશે
+        # Wait for processing
+        print("⏳ Waiting 30 seconds for Instagram to process...")
+        time.sleep(30)
         
-        # --- STEP 4: PUBLISH ---
+        # --- STEP 5: PUBLISH ---
         publish_url = f"https://graph.facebook.com/v19.0/{target_id}/media_publish"
         pub_payload = {"creation_id": creation_id, "access_token": FB_ACCESS_TOKEN}
         
@@ -88,7 +114,7 @@ def post_to_instagram():
         pub_res = requests.post(publish_url, data=pub_payload)
         
         if pub_res.status_code == 200:
-            print("🏆 VICTORY! POST IS LIVE ON INSTAGRAM! 🥳")
+            print(f"🏆 VICTORY! POST IS LIVE ON {account_name.upper()}! 🥳")
             sheet.update_cell(row_index, 9, "DONE")
         else:
             print(f"❌ Publish Failed: {pub_res.text}")
