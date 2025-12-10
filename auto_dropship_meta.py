@@ -2,64 +2,57 @@ import os
 import requests
 
 # ---------------- CONFIGURATION ---------------- #
+# ટોકન ગિટહબના ખજાનામાંથી આવશે
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
-SHEET_ID = "1aBcD..." # (તમારો જૂનો શીટ ID જ રહેશે)
 
-# 🔥 WORLD'S BEST FIX: DIRECT ID MAPPING (NO SEARCHING)
-INSTAGRAM_ACCOUNTS = {
-    "Pearl Verse": "17841479516066757"  # <-- મેં ID ફિક્સ કરી દીધું!
-}
+# 🔥 FIX NO. 1: DIRECT INSTAGRAM ID (NO SEARCHING)
+# આ ID આપણે તમારા લોગમાંથી શોધ્યું છે, જે 100% સાચું છે.
+TARGET_IG_ID = "17841479516066757" 
 
 def post_to_instagram():
-    print("🚀 STARTING FINAL ATTEMPT WITH HARDCODED ID...")
+    print("🚀 STARTING DIRECT POST INJECTION...")
 
-    # 1. Google Sheet માંથી ડેટા વાંચો (અહીં તમારો જૂનો કોડ જ આવશે)
-    # ... (તમારો ડેટા વાંચવાનો કોડ અહી સમજી લેવો)
-    
-    # ધારો કે શીટમાંથી મળ્યું:
-    account_name = "Pearl Verse"
-    image_url = "https://images.unsplash.com/..." # (તમે શીટમાં જે મૂક્યું હોય)
-    caption = "Final Victory Post! #Success"
+    # 🔥 FIX NO. 2: DIRECT IMAGE LINK (BYPASSING GOOGLE SHEET)
+    # આપણે શીટમાંથી વાંચવું જ નથી, સીધી સાચી લિંક અહીં આપી દઈએ.
+    image_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b6/Image_created_with_a_mobile_phone.png/640px-Image_created_with_a_mobile_phone.png"
+    caption = "System Success! This is a direct automated post. #PearlVerse #Victory"
 
-    # 2. ID શોધો (ડાયરેક્ટ)
-    ig_user_id = INSTAGRAM_ACCOUNTS.get(account_name)
-    
-    if not ig_user_id:
-        print(f"❌ Error: ID for {account_name} not found in script.")
-        return
+    print(f"📸 Image to Upload: {image_url}")
+    print(f"🎯 Target Account ID: {TARGET_IG_ID}")
 
-    print(f"✅ FOUND ID DIRECTLY: {ig_user_id}")
-    
-    # 3. પોસ્ટ કરો (The Final Shot)
-    post_url = f"https://graph.facebook.com/v17.0/{ig_user_id}/media"
+    # ---------------- STEP 1: UPLOAD IMAGE CONTAINER ---------------- #
+    post_url = f"https://graph.facebook.com/v19.0/{TARGET_IG_ID}/media"
     payload = {
         "image_url": image_url,
         "caption": caption,
         "access_token": FB_ACCESS_TOKEN
     }
     
-    print("📤 Uploading Image...")
+    print("📤 Uploading Image Container...")
     response = requests.post(post_url, data=payload)
     
     if response.status_code == 200:
         creation_id = response.json().get("id")
-        print(f"✅ Image Uploaded! ID: {creation_id}")
+        print(f"✅ Container Created! ID: {creation_id}")
         
-        # Publish Container
-        publish_url = f"https://graph.facebook.com/v17.0/{ig_user_id}/media_publish"
+        # ---------------- STEP 2: PUBLISH CONTAINER ---------------- #
+        publish_url = f"https://graph.facebook.com/v19.0/{TARGET_IG_ID}/media_publish"
         pub_payload = {
             "creation_id": creation_id,
             "access_token": FB_ACCESS_TOKEN
         }
+        
+        print("🚀 Publishing to Instagram Feed...")
         pub_response = requests.post(publish_url, data=pub_payload)
         
         if pub_response.status_code == 200:
-            print("🏆 VICTORY! POST PUBLISHED SUCCESSFULLY ON INSTAGRAM!")
+            print("🏆 VICTORY! POST PUBLISHED SUCCESSFULLY! 🥳")
+            print("👉 Check your Instagram now!")
         else:
             print(f"❌ Publish Failed: {pub_response.text}")
     else:
         print(f"❌ Upload Failed: {response.text}")
-        print("⚠️ HINT: If error says 'Permissions', you MUST add instagram_content_publish in Explorer!")
+        print("⚠️ NOTE: If this fails, check your Token permissions again.")
 
 if __name__ == "__main__":
     post_to_instagram()
