@@ -1,30 +1,40 @@
-name: Content YouTube Timer
+name: Content Creation Auto Poster
 
 on:
-  # આ બટનથી તમે હાથથી (manually) રન કરી શકશો
-  workflow_dispatch:
   schedule:
-    # દર કલાકે 30 મિનિટે ચાલશે (Dropshipping Bot સાથે Conflict ટાળવા માટે)
-    - cron: '30 * * * *' 
+    - cron: '40 * * * *'
+  workflow_dispatch:
 
 jobs:
-  run_bot:
+  run_content_bot:
     runs-on: ubuntu-latest
+
+    env:
+      # આ તમારી Content Creation Sheet ID છે
+      SPREADSHEET_ID: '1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY'
+      GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+      
     steps:
       - uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v3
         with:
-          python-version: '3.x'
+          python-version: '3.10'
 
-      - name: Install Libraries
+      - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install gspread google-auth google-api-python-client oauth2client requests
+
+      - name: Create Service Account Key File
+        run: |
+          echo "${{ secrets.GCP_CREDENTIALS }}" > service_account_key.json
+
+      - name: Run Master Content Bot
+        run: |
+          python auto_dropship_meta.py
           
-      - name: Run Content YouTube Bot
-        env:
-          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }} 
-        run: python content_youtube.py
+      - name: Cleanup
+        if: always()
+        run: |
+          rm service_account_key.json
