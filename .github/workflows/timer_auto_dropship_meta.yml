@@ -4,27 +4,43 @@ on:
   workflow_dispatch:
   schedule:
     # દર કલાકે 15 મિનિટે ચાલશે
-    - cron: '15 * * * *' 
+    - cron: '15 * * * *'  
 
 jobs:
   run_bot:
     runs-on: ubuntu-latest
+    
+    # અહીં આપણે SPREADSHEET_ID ઉમેરી દીધો છે
+    env:
+      # Dropshipping Sheet ID (કોડ અહીંથી વાંચશે)
+      SPREADSHEET_ID: '17XTdZkbnHPUgUhOVzAtUDM76YFhM0Yh9UBABHAa_hAA'
+      GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+      FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
+      
     steps:
       - uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v3
         with:
-          python-version: '3.x'
+          # આપણે Python 3.10 નો ઉપયોગ કરીશું
+          python-version: '3.10' 
 
       - name: Install Libraries
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # જરૂરી લાઈબ્રેરીઓ અહીં સીધી જ ઇન્સ્ટોલ કરી દઈએ
+          pip install gspread google-auth google-api-python-client oauth2client requests
+
+      - name: Create Service Account Key File
+        # આનાથી Service Account Key ફાઇલ બની જશે
+        run: |
+          echo "${{ secrets.GCP_CREDENTIALS }}" > service_account_key.json
           
       - name: Run Auto Dropship Meta Bot
-        env:
-          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }} 
-        # અહીં આપણે આપણી નવી ફાઈલનું નામ લખ્યું છે
         run: python auto_dropship_meta.py
+        
+      - name: Cleanup
+        if: always()
+        run: |
+          rm service_account_key.json
