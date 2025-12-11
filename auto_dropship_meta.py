@@ -19,13 +19,13 @@ SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 # Platform Configuration
 PLATFORM_CONFIG = {
     "instagram_tokens": {
-        # અહી તમારે તમારા સાચા Page ID અને Token નાખવાના રહેશે
+        # અહી તમારા સાચા Page ID અને Token નાખવાનું ભૂલતા નહીં!
         "Luxivibe": {"page_id": "YOUR_PAGE_ID", "access_token": "YOUR_ACCESS_TOKEN"},
         "Urban Glint": {"page_id": "YOUR_PAGE_ID", "access_token": "YOUR_ACCESS_TOKEN"},
-        # ... બાકીના બધા એકાઉન્ટ્સ અહીં ઉમેરો
+        # ... બાકીના બધા એકાઉન્ટ્સ
     },
     "youtube_channels": {
-        # હવે બધી ચેનલ માટે એક જ ફાઈલ 'service_account_key.json' વપરાશે
+        # હવે બધી ચેનલ માટે એક જ ફાઈલ વપરાશે
         "Luxivibe": "service_account_key.json",
         "Urban Glint": "service_account_key.json",
         "Royal Nexus": "service_account_key.json",
@@ -49,7 +49,7 @@ def generate_varied_title(base_title, account_name):
     return f"{' '.join(title_parts)} | {account_name}"[:100]
 
 # ==============================================================================
-# 3. Posting Functions (REAL MODE)
+# 3. Posting Functions (REAL MODE ACTIVATED)
 # ==============================================================================
 
 def instagram_post(post_data, config, row_num):
@@ -59,6 +59,7 @@ def instagram_post(post_data, config, row_num):
     tokens = config["instagram_tokens"].get(account_name)
     if not tokens:
         print(f"❌ No Instagram tokens found for {account_name}")
+        # જો ટોકન ન હોય તો પણ આપણે કોડ ચાલવા દઈશું (YouTube માટે)
         return False
         
     page_id = tokens["page_id"]
@@ -66,7 +67,7 @@ def instagram_post(post_data, config, row_num):
     video_url = post_data['Video_URL']
     caption = post_data['Caption']
 
-    # 2. Upload Video (Step 1: Init)
+    # 2. Upload Video
     try:
         url = f"https://graph.facebook.com/v18.0/{page_id}/media"
         payload = {
@@ -85,11 +86,9 @@ def instagram_post(post_data, config, row_num):
         creation_id = result['id']
         print(f"Media Container Created: {creation_id}")
         
-        # 3. Wait for Processing
         print("Waiting for video processing...")
-        time.sleep(15) 
+        time.sleep(20) # થોડી વધુ રાહ જોઈએ
         
-        # 4. Publish Video
         publish_url = f"https://graph.facebook.com/v18.0/{page_id}/media_publish"
         publish_payload = {
             'creation_id': creation_id,
@@ -112,7 +111,7 @@ def instagram_post(post_data, config, row_num):
 def youtube_post(post_data, config, row_num):
     account_name = post_data['Account_Name']
     try:
-        # YouTube માટે હવે એક જ ફાઈલ વપરાશે
+        # ફિક્સ: હવે માસ્ટર કી જ વપરાશે
         creds_file = 'service_account_key.json'
         
         creds = Credentials.from_service_account_file(
@@ -121,7 +120,7 @@ def youtube_post(post_data, config, row_num):
         )
         youtube = build('youtube', 'v3', credentials=creds)
     except Exception as e:
-        print(f"❌ YouTube Auth failed for {account_name}: {e}")
+        print(f"❌ YouTube Auth failed: {e}")
         return False
 
     video_url = post_data['Video_URL']
@@ -187,9 +186,7 @@ def run_master_automation():
         if current_status == 'PENDING' or current_status == 'FAIL':
             
             platform = row.get('Platform', '').strip()
-            # જો DONE હોય તો આગળ વધો
-            if current_status == 'DONE': 
-                continue
+            if current_status == 'DONE': continue
 
             success = False
             if platform.lower() == 'instagram':
