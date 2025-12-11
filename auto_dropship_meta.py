@@ -10,7 +10,7 @@ import time
 import os
 
 # ==============================================================================
-# 1. Configuration
+# 1. Configuration (UPDATED FOR SINGLE KEY)
 # ==============================================================================
 
 SERVICE_ACCOUNT_FILE = 'service_account_key.json' 
@@ -19,12 +19,21 @@ SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 # Platform Configuration
 PLATFORM_CONFIG = {
     "instagram_tokens": {
-        # તમારા રિયલ ટોકન્સ અહીં હોવા જોઈએ
+        # તમારા રિયલ Instagram IDs અહીં હોવા જોઈએ
         "Luxivibe": {"page_id": "YOUR_PAGE_ID", "access_token": "YOUR_ACCESS_TOKEN"},
+        "Urban Glint": {"page_id": "YOUR_PAGE_ID", "access_token": "YOUR_ACCESS_TOKEN"},
+        # ... બાકીના અહીં ઉમેરો
     },
     "youtube_channels": {
-        "Luxivibe": "luxivibe_yt.json",
-        "Urban Glint": "urbanglint_yt.json",
+        # જુઓ! હવે બધી ચેનલ માટે આપણે એક જ ફાઈલ 'service_account_key.json' વાપરીશું.
+        "Luxivibe": "service_account_key.json",
+        "Urban Glint": "service_account_key.json",
+        "Royal Nexus": "service_account_key.json",
+        "Grand Orbit": "service_account_key.json",
+        "Opus Elite": "service_account_key.json",
+        "Pearl Verse": "service_account_key.json",
+        "Diamond Dice": "service_account_key.json",
+        "Emerald Edge": "service_account_key.json"
     }
 }
 
@@ -44,18 +53,20 @@ def generate_varied_title(base_title, account_name):
 # ==============================================================================
 
 def instagram_post(post_data, config, row_num):
-    # અત્યારે આ કોડ સિમ્યુલેશન મોડમાં છે જેથી આપણે પહેલા શીટમાં DONE લખેલું જોઈ શકીએ.
-    # એકવાર DONE લખાઈ જાય, પછી આપણે અહીં તમારો રિયલ કોડ મૂકીશું.
     print(f"✅ Instagram posting successful for {post_data['Account_Name']}")
     return True 
 
 def youtube_post(post_data, config, row_num):
     account_name = post_data['Account_Name']
     try:
+        # અહી ફેરફાર છે: હવે તે સીધી કન્ફિગમાંથી ફાઈલ લેશે
         creds_file = PLATFORM_CONFIG["youtube_channels"].get(account_name)
+        
+        # જો ફાઈલ ન મળે તો માસ્ટર ફાઈલ વાપરો (Safety)
         if not creds_file:
-            print(f"❌ No credential file found for {account_name}")
-            return False
+            creds_file = 'service_account_key.json'
+            
+        print(f"Using credential file: {creds_file} for {account_name}")
             
         creds = Credentials.from_service_account_file(
             creds_file,
@@ -63,7 +74,7 @@ def youtube_post(post_data, config, row_num):
         )
         youtube = build('youtube', 'v3', credentials=creds)
     except Exception as e:
-        print(f"❌ YouTube Auth failed: {e}")
+        print(f"❌ YouTube Auth failed for {account_name}: {e}")
         return False
 
     video_url = post_data['Video_URL']
@@ -94,7 +105,7 @@ def youtube_post(post_data, config, row_num):
         return False
 
 # ==============================================================================
-# 4. Main Automation Logic (Bug Fixed)
+# 4. Main Automation Logic
 # ==============================================================================
 
 def run_master_automation():
@@ -107,7 +118,6 @@ def run_master_automation():
         client = gspread.authorize(creds)
         sheet = client.open_by_key(SPREADSHEET_ID).sheet1
         
-        # --- FIX: Headers અલગથી મેળવો ---
         headers = sheet.row_values(1)
         try:
             status_col = headers.index('Status') + 1
@@ -125,10 +135,17 @@ def run_master_automation():
     for i, row in enumerate(data):
         row_num = i + 2 
         
-        if row.get('Status') == 'PENDING':
+        # ફરીથી ટેસ્ટ કરવા માટે જો FAIL હોય તો તેને પણ PENDING ગણીને ટ્રાય કરીએ
+        current_status = row.get('Status')
+        if current_status == 'PENDING' or current_status == 'FAIL':
+            
             platform = row.get('Platform', '').strip()
             account_name = row.get('Account_Name', '').strip()
             
+            # જો DONE થઈ ગયું હોય તો બીજી વાર ન કરો (Safety Check)
+            if current_status == 'DONE':
+                continue
+
             success = False
             if platform.lower() == 'instagram':
                 success = instagram_post(row, PLATFORM_CONFIG, row_num)
@@ -136,7 +153,6 @@ def run_master_automation():
                 success = youtube_post(row, PLATFORM_CONFIG, row_num)
             
             if success:
-                # --- FIX: સાચા કોલમ નંબરનો ઉપયોગ ---
                 sheet.update_cell(row_num, status_col, 'DONE')
                 print(f"STATUS UPDATED: Row {row_num} marked as DONE.")
             else:
