@@ -10,7 +10,7 @@ import time
 import os
 
 # ==============================================================================
-# 1. Configuration (UPDATED FOR SINGLE KEY)
+# 1. Configuration
 # ==============================================================================
 
 SERVICE_ACCOUNT_FILE = 'service_account_key.json' 
@@ -19,13 +19,13 @@ SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 # Platform Configuration
 PLATFORM_CONFIG = {
     "instagram_tokens": {
-        # તમારા રિયલ Instagram IDs અહીં હોવા જોઈએ
+        # અહી તમારે તમારા સાચા Page ID અને Token નાખવાના રહેશે
         "Luxivibe": {"page_id": "YOUR_PAGE_ID", "access_token": "YOUR_ACCESS_TOKEN"},
         "Urban Glint": {"page_id": "YOUR_PAGE_ID", "access_token": "YOUR_ACCESS_TOKEN"},
-        # ... બાકીના અહીં ઉમેરો
+        # ... બાકીના બધા એકાઉન્ટ્સ અહીં ઉમેરો
     },
     "youtube_channels": {
-        # જુઓ! હવે બધી ચેનલ માટે આપણે એક જ ફાઈલ 'service_account_key.json' વાપરીશું.
+        # હવે બધી ચેનલ માટે એક જ ફાઈલ 'service_account_key.json' વપરાશે
         "Luxivibe": "service_account_key.json",
         "Urban Glint": "service_account_key.json",
         "Royal Nexus": "service_account_key.json",
@@ -49,25 +49,72 @@ def generate_varied_title(base_title, account_name):
     return f"{' '.join(title_parts)} | {account_name}"[:100]
 
 # ==============================================================================
-# 3. Posting Functions
+# 3. Posting Functions (REAL MODE)
 # ==============================================================================
 
 def instagram_post(post_data, config, row_num):
-    print(f"✅ Instagram posting successful for {post_data['Account_Name']}")
-    return True 
+    account_name = post_data['Account_Name']
+    
+    # 1. Get Tokens
+    tokens = config["instagram_tokens"].get(account_name)
+    if not tokens:
+        print(f"❌ No Instagram tokens found for {account_name}")
+        return False
+        
+    page_id = tokens["page_id"]
+    access_token = tokens["access_token"]
+    video_url = post_data['Video_URL']
+    caption = post_data['Caption']
+
+    # 2. Upload Video (Step 1: Init)
+    try:
+        url = f"https://graph.facebook.com/v18.0/{page_id}/media"
+        payload = {
+            'media_type': 'REELS',
+            'video_url': video_url,
+            'caption': caption,
+            'access_token': access_token
+        }
+        response = requests.post(url, data=payload)
+        result = response.json()
+        
+        if 'id' not in result:
+            print(f"❌ Init failed: {result}")
+            return False
+            
+        creation_id = result['id']
+        print(f"Media Container Created: {creation_id}")
+        
+        # 3. Wait for Processing
+        print("Waiting for video processing...")
+        time.sleep(15) 
+        
+        # 4. Publish Video
+        publish_url = f"https://graph.facebook.com/v18.0/{page_id}/media_publish"
+        publish_payload = {
+            'creation_id': creation_id,
+            'access_token': access_token
+        }
+        publish_response = requests.post(publish_url, data=publish_payload)
+        publish_result = publish_response.json()
+        
+        if 'id' in publish_result:
+            print(f"✅ Instagram REEL Published Successfully! ID: {publish_result['id']}")
+            return True
+        else:
+            print(f"❌ Publish failed: {publish_result}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Instagram Error: {e}")
+        return False
 
 def youtube_post(post_data, config, row_num):
     account_name = post_data['Account_Name']
     try:
-        # અહી ફેરફાર છે: હવે તે સીધી કન્ફિગમાંથી ફાઈલ લેશે
-        creds_file = PLATFORM_CONFIG["youtube_channels"].get(account_name)
+        # YouTube માટે હવે એક જ ફાઈલ વપરાશે
+        creds_file = 'service_account_key.json'
         
-        # જો ફાઈલ ન મળે તો માસ્ટર ફાઈલ વાપરો (Safety)
-        if not creds_file:
-            creds_file = 'service_account_key.json'
-            
-        print(f"Using credential file: {creds_file} for {account_name}")
-            
         creds = Credentials.from_service_account_file(
             creds_file,
             scopes=['https://www.googleapis.com/auth/youtube.force-ssl']
@@ -135,15 +182,13 @@ def run_master_automation():
     for i, row in enumerate(data):
         row_num = i + 2 
         
-        # ફરીથી ટેસ્ટ કરવા માટે જો FAIL હોય તો તેને પણ PENDING ગણીને ટ્રાય કરીએ
         current_status = row.get('Status')
+        # PENDING અથવા FAIL હોય તો જ ફરી કરો
         if current_status == 'PENDING' or current_status == 'FAIL':
             
             platform = row.get('Platform', '').strip()
-            account_name = row.get('Account_Name', '').strip()
-            
-            # જો DONE થઈ ગયું હોય તો બીજી વાર ન કરો (Safety Check)
-            if current_status == 'DONE':
+            # જો DONE હોય તો આગળ વધો
+            if current_status == 'DONE': 
                 continue
 
             success = False
