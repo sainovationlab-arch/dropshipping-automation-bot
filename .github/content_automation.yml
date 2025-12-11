@@ -1,22 +1,14 @@
 name: Content Creation Auto Poster
 
 on:
-  # આ workflow દર 40 મિનિટે રન થશે, જેથી dropshipping થી અલગ સમય મળે
   schedule:
     - cron: '40 * * * *'
-  # જો મેન્યુઅલી ચલાવવું હોય તો
   workflow_dispatch:
-  
+
 jobs:
   run_content_bot:
     runs-on: ubuntu-latest
 
-    env:
-      # આ Content Creation Sheet ની ID હશે (અહીં તમે મને આપેલી ID નાખવી)
-      SPREADSHEET_ID: 'તમારી_CONTENT_CREATION_SHEET_ID_અહીં_નાખો'
-      # તમારી Dropshipping Sheet ની કી જ વાપરવાની
-      GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-      
     steps:
       - uses: actions/checkout@v3
 
@@ -30,13 +22,16 @@ jobs:
           pip install gspread google-auth google-api-python-client oauth2client requests
 
       - name: Create Service Account Key File
-        # આ સર્વિસ અકાઉન્ટ કી કોડને વાપરવા માટે ફાઇલ બનાવે છે
+        # આ સાચી અને સુરક્ષિત રીત છે (Environment Variable વાપરીને)
+        env:
+          GCP_DATA: ${{ secrets.GCP_CREDENTIALS }}
         run: |
-          echo "${{ secrets.GCP_CREDENTIALS }}" > service_account_key.json
+          echo "$GCP_DATA" > service_account_key.json
 
       - name: Run Master Content Bot
+        env:
+          SPREADSHEET_ID: '1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY'
         run: |
-          # અહીં Master Code (auto_dropship_meta.py) રન થશે
           python auto_dropship_meta.py
           
       - name: Cleanup
