@@ -12,13 +12,18 @@ from google.oauth2.service_account import Credentials as ServiceAccountCredentia
 from google.oauth2.credentials import Credentials as UserCredentials
 
 # ==============================================================================
-# 1. CONFIGURATION
+# 1. CONFIGURATION & MULTI-PROJECT SETUP
 # ==============================================================================
 
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 GCP_CREDENTIALS_JSON = os.environ.get("GCP_CREDENTIALS")
-YOUTUBE_TOKEN_JSON = os.environ.get("YOUTUBE_TOKEN_JSON")
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
+
+# ચારેય પ્રોજેક્ટની ચાવીઓ લાવો
+YT_TOKEN_1 = os.environ.get("YOUTUBE_TOKEN_JSON")
+YT_TOKEN_2 = os.environ.get("YOUTUBE_TOKEN_2")
+YT_TOKEN_3 = os.environ.get("YOUTUBE_TOKEN_3")
+YT_TOKEN_4 = os.environ.get("YOUTUBE_TOKEN_4")
 
 INSTAGRAM_IDS = {
     "Emerald Edge": "17841478369307404",
@@ -30,6 +35,22 @@ INSTAGRAM_IDS = {
     "Pearl Verse": "17841478822408000",
     "Royal Nexus": "17841479056452004",
     "Luxivibe": "17841479492205083"
+}
+
+# સ્માર્ટ મેપિંગ: કયા એકાઉન્ટ માટે કયો પ્રોજેક્ટ વાપરવો
+YOUTUBE_PROJECT_MAP = {
+    "Luxivibe": YT_TOKEN_1,
+    "Urban Glint": YT_TOKEN_1,
+    
+    "Royal Nexus": YT_TOKEN_2,
+    "Grand Orbit": YT_TOKEN_2,
+    
+    "Opus": YT_TOKEN_3,
+    "Opus Elite": YT_TOKEN_3,
+    "Pearl Verse": YT_TOKEN_3,
+    
+    "Diamond Dice": YT_TOKEN_4,
+    "Emerald Edge": YT_TOKEN_4
 }
 
 # ==============================================================================
@@ -52,29 +73,29 @@ def get_sheet_service():
         print(f"❌ Sheet Connection Error: {e}")
         return None
 
-def get_youtube_service():
+def get_youtube_service(account_name):
+    """Selects the correct YouTube Project based on Account Name."""
     try:
-        if not YOUTUBE_TOKEN_JSON:
-            print("❌ YouTube Token Missing in Secrets!")
+        # એકાઉન્ટના નામ પરથી નક્કી કરો કે કઈ ચાવી વાપરવી
+        token_json = YOUTUBE_PROJECT_MAP.get(str(account_name).strip(), YT_TOKEN_1)
+        
+        if not token_json:
+            print(f"❌ No YouTube Token found for {account_name} (Check Secrets!)")
             return None
-        token_dict = json.loads(YOUTUBE_TOKEN_JSON)
+            
+        token_dict = json.loads(token_json)
         creds = UserCredentials.from_authorized_user_info(token_dict)
         return build('youtube', 'v3', credentials=creds)
     except Exception as e:
-        print(f"❌ YouTube Auth Error: {e}")
+        print(f"❌ YouTube Auth Error for {account_name}: {e}")
         return None
 
-# --- SAFE SHEET UPDATER (NEW WEAPON 🛡️) ---
 def safe_update_cell(sheet, row, col, value):
-    """Updates sheet but prevents crashing if permission is missing."""
     try:
         sheet.update_cell(row, col, value)
-        return True
     except Exception as e:
-        print(f"⚠️ WARNING: Video uploaded but Sheet Update Failed! Check Permissions. Error: {e}")
-        return False
+        print(f"⚠️ Sheet Update Failed (Check Permissions): {e}")
 
-# --- SMART DOWNLOADER ---
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def download_video(url):
     print(f"⬇️ Downloading video from: {url}")
@@ -85,8 +106,7 @@ def download_video(url):
         else:
             response = requests.get(url, stream=True)
             with open(output_file, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                for chunk in response.iter_content(chunk_size=8192): f.write(chunk)
         
         if os.path.exists(output_file) and os.path.getsize(output_file) > 1000:
             print(f"✅ Downloaded: {output_file} ({os.path.getsize(output_file)} bytes)")
@@ -115,20 +135,12 @@ def instagram_post(row, row_num):
     caption = row.get('Caption', '')
     
     print(f"📸 Posting to Instagram: {account_name}...")
-
-    # 1. Download
     local_file = download_video(video_url)
     if not local_file: return None
 
     try:
-        # 2. Start Session
         url = f"https://graph.facebook.com/v19.0/{page_id}/media"
-        params = {
-            'access_token': FB_ACCESS_TOKEN,
-            'upload_type': 'resumable', 
-            'media_type': 'REELS',
-            'caption': caption
-        }
+        params = {'access_token': FB_ACCESS_TOKEN, 'upload_type': 'resumable', 'media_type': 'REELS', 'caption': caption}
         
         init_res = requests.post(url, params=params).json()
         upload_uri = init_res.get('uri')
@@ -139,27 +151,20 @@ def instagram_post(row, row_num):
             if os.path.exists(local_file): os.remove(local_file)
             return None
 
-        # 3. Upload Bytes
-        print(f"   - Uploading bytes to Instagram...")
+        print(f"   - Uploading bytes...")
         file_size = os.path.getsize(local_file)
-        
         with open(local_file, 'rb') as f:
-            headers = {
-                'Authorization': f'OAuth {FB_ACCESS_TOKEN}',
-                'offset': '0',
-                'file_size': str(file_size)
-            }
+            headers = {'Authorization': f'OAuth {FB_ACCESS_TOKEN}', 'offset': '0', 'file_size': str(file_size)}
             upload_res = requests.post(upload_uri, data=f, headers=headers)
         
         if upload_res.status_code != 200:
-            print(f"❌ Upload Bytes Failed: {upload_res.text}")
+            print(f"❌ Upload Failed: {upload_res.text}")
             if os.path.exists(local_file): os.remove(local_file)
             return None
 
-        # 4. Publish
         print(f"   - Uploaded. ID: {video_id}. Waiting 60s...")
         if os.path.exists(local_file): os.remove(local_file)
-        time.sleep(60) 
+        time.sleep(60)
         
         pub_url = f"https://graph.facebook.com/v19.0/{page_id}/media_publish"
         pub_params = {'creation_id': video_id, 'access_token': FB_ACCESS_TOKEN}
@@ -168,17 +173,16 @@ def instagram_post(row, row_num):
         if pub_res.get('id'):
             print(f"✅ IG Published! ID: {pub_res['id']}")
             return "IG_SUCCESS"
-        else:
-            print(f"❌ IG Publish Failed: {pub_res}")
-            return None
-
+        return None
     except Exception as e:
         print(f"❌ IG Error: {e}")
         if os.path.exists(local_file): os.remove(local_file)
         return None
 
 def youtube_post(row, row_num):
-    youtube = get_youtube_service()
+    account_name = str(row.get('Account_Name', '')).strip()
+    # 👇 અહીં જાદુ થશે: એકાઉન્ટ મુજબ અલગ પ્રોજેક્ટ વપરાશે
+    youtube = get_youtube_service(account_name)
     if not youtube: return None
 
     video_url = row.get('Video_URL')
@@ -186,21 +190,16 @@ def youtube_post(row, row_num):
     if not local_file: return None
 
     base_title = row.get('Base_Title', 'New Video')
-    final_title = f"{base_title} | {row.get('Account_Name')}"[:100]
+    final_title = f"{base_title} | {account_name}"[:100]
     description = row.get('Caption', '')
     tags = str(row.get('Tags', 'shorts,viral')).split(',')
 
     body = {
-        'snippet': {
-            'title': final_title,
-            'description': description,
-            'categoryId': '22',
-            'tags': tags
-        },
+        'snippet': {'title': final_title, 'description': description, 'categoryId': '22', 'tags': tags},
         'status': {'privacyStatus': 'public'}
     }
 
-    print("🚀 Uploading to YouTube...")
+    print(f"🚀 Uploading to YouTube ({account_name})...")
     media = MediaFileUpload(local_file, chunksize=-1, resumable=True)
     
     try:
@@ -212,10 +211,8 @@ def youtube_post(row, row_num):
         
         video_id = resp.get('id')
         print(f"✅ YouTube Upload Success! ID: {video_id}")
-        
         if os.path.exists(local_file): os.remove(local_file)
         return f"https://youtu.be/{video_id}" 
-        
     except Exception as e:
         print(f"❌ YouTube Upload Error: {e}")
         if os.path.exists(local_file): os.remove(local_file)
@@ -234,17 +231,13 @@ def run_master_automation():
         if not data: return
         headers = list(data[0].keys())
         sheet_headers = sheet.row_values(1)
-        
         def get_col_idx(name):
             try: return next(i for i, v in enumerate(sheet_headers) if v.lower() == name.lower()) + 1
             except: return None
 
         status_col_idx = get_col_idx('Status')
         link_col_idx = get_col_idx('Link')
-
-        if not status_col_idx:
-            print("❌ Error: 'Status' column not found.")
-            return
+        if not status_col_idx: return
 
     except Exception as e:
         print(f"❌ Data Read Error: {e}")
@@ -254,12 +247,10 @@ def run_master_automation():
 
     for i, row in enumerate(data):
         row_num = i + 2
-        
         status_key = next((h for h in headers if h.lower() == 'status'), None)
         current_status = str(row.get(status_key, '')).strip().upper()
         
         if current_status == 'PENDING' or current_status == 'FAIL':
-            
             platform_key = next((h for h in headers if h.lower() == 'platform'), None)
             platform = str(row.get(platform_key, '')).strip().lower()
             
@@ -275,12 +266,9 @@ def run_master_automation():
                 result_link = youtube_post(row, row_num)
             
             if result_link:
-                # SAFE UPDATE (Shield 🛡️)
                 safe_update_cell(sheet, row_num, status_col_idx, 'DONE')
-                
                 if link_col_idx and "http" in str(result_link):
                     safe_update_cell(sheet, row_num, link_col_idx, result_link)
-                    
                 print(f"✅ Row {row_num} DONE. Link: {result_link}")
             else:
                 safe_update_cell(sheet, row_num, status_col_idx, 'FAIL')
