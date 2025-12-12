@@ -3,7 +3,7 @@ name: Content Auto Bot (Final)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '40 * * * *'
+    - cron: '40 * * * *'  # દર કલાકે 40મી મિનિટે ચાલશે
 
 jobs:
   run_bot:
@@ -21,8 +21,15 @@ jobs:
       - name: Run Master Bot
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
           FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
+          
+          # 👇 આ રહી આપણી 4 જાદુઈ ચાવીઓ (Unlimited Uploads માટે)
+          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+          YOUTUBE_TOKEN_2: ${{ secrets.YOUTUBE_TOKEN_2 }}
+          YOUTUBE_TOKEN_3: ${{ secrets.YOUTUBE_TOKEN_3 }}
+          YOUTUBE_TOKEN_4: ${{ secrets.YOUTUBE_TOKEN_4 }}
+          
+          # 👇 Content Sheet ID (આ તમારી Content Sheet ની ID છે)
           SPREADSHEET_ID: '1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY'
-        # 👇 આ લાઈન સૌથી મહત્વની છે
+        
         run: python master_bot_final.py
