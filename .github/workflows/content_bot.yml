@@ -3,7 +3,7 @@ name: Content Auto Bot (Final)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '40 * * * *'  # દર કલાકે 40મી મિનિટે ચાલશે
+    - cron: '40 * * * *'
 
 jobs:
   run_bot:
@@ -23,13 +23,17 @@ jobs:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
           FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
           
-          # 👇 આ રહી આપણી 4 જાદુઈ ચાવીઓ (Unlimited Uploads માટે)
-          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
-          YOUTUBE_TOKEN_2: ${{ secrets.YOUTUBE_TOKEN_2 }}
-          YOUTUBE_TOKEN_3: ${{ secrets.YOUTUBE_TOKEN_3 }}
-          YOUTUBE_TOKEN_4: ${{ secrets.YOUTUBE_TOKEN_4 }}
-          
-          # 👇 Content Sheet ID (આ તમારી Content Sheet ની ID છે)
+          # 👇 8 ચેનલની 8 નવી ચાવીઓ
+          YT_PEARL_VERSE: ${{ secrets.YT_PEARL_VERSE }}
+          YT_OPUS_ELITE: ${{ secrets.YT_OPUS_ELITE }}
+          YT_DIAMOND_DICE: ${{ secrets.YT_DIAMOND_DICE }}
+          YT_EMERALD_EDGE: ${{ secrets.YT_EMERALD_EDGE }}
+          YT_ROYAL_NEXUS: ${{ secrets.YT_ROYAL_NEXUS }}
+          YT_GRAND_ORBIT: ${{ secrets.YT_GRAND_ORBIT }}
+          YT_URBAN_GLINT: ${{ secrets.YT_URBAN_GLINT }}
+          YT_LUXI_VIBE: ${{ secrets.YT_LUXI_VIBE }}
+
+          # 👇 Content Sheet ID (આ તમારી Content Sheet છે)
           SPREADSHEET_ID: '1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY'
         
         run: python master_bot_final.py
