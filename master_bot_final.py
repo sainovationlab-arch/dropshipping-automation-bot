@@ -64,6 +64,17 @@ def get_youtube_service():
         print(f"❌ YouTube Auth Error: {e}")
         return None
 
+# --- SAFE SHEET UPDATER (NEW WEAPON 🛡️) ---
+def safe_update_cell(sheet, row, col, value):
+    """Updates sheet but prevents crashing if permission is missing."""
+    try:
+        sheet.update_cell(row, col, value)
+        return True
+    except Exception as e:
+        print(f"⚠️ WARNING: Video uploaded but Sheet Update Failed! Check Permissions. Error: {e}")
+        return False
+
+# --- SMART DOWNLOADER ---
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def download_video(url):
     print(f"⬇️ Downloading video from: {url}")
@@ -89,7 +100,7 @@ def download_video(url):
         raise e
 
 # ==============================================================================
-# 3. POSTING FUNCTIONS (HEADER FIXED)
+# 3. POSTING FUNCTIONS
 # ==============================================================================
 
 def instagram_post(row, row_num):
@@ -105,7 +116,7 @@ def instagram_post(row, row_num):
     
     print(f"📸 Posting to Instagram: {account_name}...")
 
-    # 1. Download Video
+    # 1. Download
     local_file = download_video(video_url)
     if not local_file: return None
 
@@ -128,15 +139,15 @@ def instagram_post(row, row_num):
             if os.path.exists(local_file): os.remove(local_file)
             return None
 
-        # 3. Upload Bytes (HEADER FIX HERE)
+        # 3. Upload Bytes
         print(f"   - Uploading bytes to Instagram...")
         file_size = os.path.getsize(local_file)
         
         with open(local_file, 'rb') as f:
             headers = {
                 'Authorization': f'OAuth {FB_ACCESS_TOKEN}',
-                'offset': '0',             # <--- આ સુધાર્યું (પહેલા file_offset હતું)
-                'file_size': str(file_size) # <--- આ નવું ઉમેર્યું (સેફ્ટી માટે)
+                'offset': '0',
+                'file_size': str(file_size)
             }
             upload_res = requests.post(upload_uri, data=f, headers=headers)
         
@@ -264,12 +275,15 @@ def run_master_automation():
                 result_link = youtube_post(row, row_num)
             
             if result_link:
-                sheet.update_cell(row_num, status_col_idx, 'DONE')
+                # SAFE UPDATE (Shield 🛡️)
+                safe_update_cell(sheet, row_num, status_col_idx, 'DONE')
+                
                 if link_col_idx and "http" in str(result_link):
-                    sheet.update_cell(row_num, link_col_idx, result_link)
+                    safe_update_cell(sheet, row_num, link_col_idx, result_link)
+                    
                 print(f"✅ Row {row_num} DONE. Link: {result_link}")
             else:
-                sheet.update_cell(row_num, status_col_idx, 'FAIL')
+                safe_update_cell(sheet, row_num, status_col_idx, 'FAIL')
                 print(f"❌ Row {row_num} FAIL")
 
 if __name__ == "__main__":
