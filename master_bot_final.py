@@ -6,7 +6,7 @@ import os
 import time
 import gdown
 from tenacity import retry, stop_after_attempt, wait_fixed
-from googleapiclient.http import MediaFileUpload  # <--- સુધારો: Local File Upload માટે
+from googleapiclient.http import MediaFileUpload
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 from google.oauth2.credentials import Credentials as UserCredentials
@@ -64,29 +64,35 @@ def get_youtube_service():
         print(f"❌ YouTube Auth Error: {e}")
         return None
 
+# --- INSTAGRAM SPECIAL: Drive Link -> Direct Link Converter ---
+def get_direct_drive_link(url):
+    """Google Drive Link ને Direct Download Link માં ફેરવે છે."""
+    if "drive.google.com" in url:
+        try:
+            # File ID શોધો
+            file_id = url.split('/d/')[1].split('/')[0]
+            # Direct Link બનાવો
+            return f"https://drive.google.com/uc?export=download&id={file_id}"
+        except:
+            return url # જો ફોર્મેટ અલગ હોય તો ઓરિજિનલ પાછી આપો
+    return url
+
+# --- YOUTUBE SPECIAL: File Downloader ---
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def download_video(url):
-    """ડ્રાઈવ અને ડાયરેક્ટ લિંક બંને માટે સ્માર્ટ ડાઉનલોડર"""
-    print(f"⬇️ Downloading video from: {url}")
-    # ફાઈલને રેન્ડમ નામ આપીએ જેથી ઓવરરાઈટ ન થાય
+    print(f"⬇️ Downloading video for YouTube...")
     output_file = f"video_{random.randint(1000, 9999)}.mp4"
-    
     try:
         if "drive.google.com" in url:
             gdown.download(url, output_file, quiet=False, fuzzy=True)
         else:
             response = requests.get(url, stream=True)
-            response.raise_for_status()
             with open(output_file, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                for chunk in response.iter_content(chunk_size=8192): f.write(chunk)
         
         if os.path.exists(output_file) and os.path.getsize(output_file) > 1000:
-            print(f"✅ Downloaded: {output_file} ({os.path.getsize(output_file)} bytes)")
             return output_file
-        else:
-            print("❌ Download Failed: File empty.")
-            return None
+        return None
     except Exception as e:
         print(f"❌ Download Error: {e}")
         if os.path.exists(output_file): os.remove(output_file)
@@ -107,34 +113,28 @@ def instagram_post(row, row_num):
     video_url = row.get('Video_URL')
     caption = row.get('Caption', '')
     
-    print(f"📸 Posting to Instagram: {account_name}...")
-
-    # ૧. પહેલા વિડિયો ડાઉનલોડ કરો (ગૂગલ ડ્રાઈવ ઇશ્યૂ સોલ્વ કરવા)
-    local_file = download_video(video_url)
-    if not local_file: return None
+    # --- ફિક્સ: Direct Link વાપરો ---
+    direct_url = get_direct_drive_link(video_url)
+    print(f"📸 Posting to Instagram: {account_name} using Direct Link...")
 
     try:
-        # ૨. ગ્રાફ API દ્વારા ફાઈલ અપલોડ કરો (URL નહીં, પણ ફાઈલ!)
+        # ૧. ઈન્સ્ટાગ્રામને લિંક આપો (ફાઈલ નહીં)
         url = f"https://graph.facebook.com/v19.0/{page_id}/media"
         params = {
             'access_token': FB_ACCESS_TOKEN,
             'caption': caption,
-            'media_type': 'REELS'
+            'media_type': 'REELS',
+            'video_url': direct_url # <--- Direct Link Here
         }
-        
-        # આ રીતે ફાઈલ મોકલવાથી ડ્રાઈવની લિંકનો પ્રોબ્લેમ નહીં આવે
-        with open(local_file, 'rb') as video_data:
-            files = {'video_file': video_data}
-            response = requests.post(url, params=params, files=files).json()
-        
+        response = requests.post(url, data=params).json()
         creation_id = response.get('id')
 
         if not creation_id:
             print(f"❌ IG Init Failed: {response}")
-            if os.path.exists(local_file): os.remove(local_file)
             return None
 
-        print(f"   - Container: {creation_id}. Waiting 60s...")
+        # ૨. રાહ જુઓ (60 સેકન્ડ)
+        print(f"   - Container: {creation_id}. Waiting 60s for transcoding...")
         time.sleep(60) 
         
         # ૩. પબ્લિશ કરો
@@ -142,9 +142,6 @@ def instagram_post(row, row_num):
         pub_params = {'creation_id': creation_id, 'access_token': FB_ACCESS_TOKEN}
         pub_res = requests.post(pub_url, params=pub_params).json()
         
-        # કામ પત્યા પછી ફાઈલ ડિલીટ કરો
-        if os.path.exists(local_file): os.remove(local_file)
-
         if pub_res.get('id'):
             print(f"✅ IG Published! ID: {pub_res['id']}")
             return "IG_SUCCESS"
@@ -154,7 +151,6 @@ def instagram_post(row, row_num):
 
     except Exception as e:
         print(f"❌ IG Error: {e}")
-        if os.path.exists(local_file): os.remove(local_file)
         return None
 
 def youtube_post(row, row_num):
@@ -163,7 +159,7 @@ def youtube_post(row, row_num):
 
     video_url = row.get('Video_URL')
     
-    # ૧. વિડિયો ડાઉનલોડ કરો
+    # --- ફિક્સ: YouTube માટે ડાઉનલોડ કરો ---
     local_file = download_video(video_url)
     if not local_file: return None
 
@@ -183,8 +179,6 @@ def youtube_post(row, row_num):
     }
 
     print("🚀 Uploading to YouTube...")
-    
-    # સુધારો: MediaFileUpload વાપરો (આ ફાઈલ પાથ સ્વીકારે છે)
     media = MediaFileUpload(local_file, chunksize=-1, resumable=True)
     
     try:
@@ -192,8 +186,7 @@ def youtube_post(row, row_num):
         resp = None
         while resp is None:
             status, resp = req.next_chunk()
-            if status:
-                print(f"   - Uploading {int(status.progress() * 100)}%...")
+            if status: print(f"   - Uploading {int(status.progress() * 100)}%...")
         
         video_id = resp.get('id')
         print(f"✅ YouTube Upload Success! ID: {video_id}")
@@ -207,7 +200,7 @@ def youtube_post(row, row_num):
         return None
 
 # ==============================================================================
-# 3. MAIN AUTOMATION ENGINE
+# 3. MAIN AUTOMATION
 # ==============================================================================
 
 def run_master_automation():
@@ -216,7 +209,8 @@ def run_master_automation():
 
     try:
         data = sheet.get_all_records()
-        headers = list(data[0].keys()) if data else []
+        if not data: return
+        headers = list(data[0].keys())
         sheet_headers = sheet.row_values(1)
         
         def get_col_idx(name):
@@ -238,7 +232,6 @@ def run_master_automation():
 
     for i, row in enumerate(data):
         row_num = i + 2
-        
         status_key = next((h for h in headers if h.lower() == 'status'), None)
         current_status = str(row.get(status_key, '')).strip().upper()
         
