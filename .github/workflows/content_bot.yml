@@ -1,4 +1,4 @@
-name: Content Creation Auto Bot
+name: Content Auto Bot (Final)
 
 on:
   workflow_dispatch:
@@ -19,6 +19,7 @@ jobs:
       - name: Run Master Bot
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          # આ તમારો Content Sheet ID છે
+          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+          FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
           SPREADSHEET_ID: '1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY'
-        run: python master_bot.py
+        run: python master_bot_final.py
