@@ -15,8 +15,7 @@ jobs:
         with:
           python-version: '3.10'
       
-      - name: Install Libraries (Updated)
-        # 👇 આ લાઈન સૌથી મહત્વની છે! આમાં gdown હોવું જ જોઈએ
+      - name: Install Libraries
         run: pip install gspread google-auth google-api-python-client oauth2client requests gdown tenacity
 
       - name: Run Master Bot
@@ -25,4 +24,5 @@ jobs:
           YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
           FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
           SPREADSHEET_ID: '1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY'
+        # 👇 આ લાઈન સૌથી મહત્વની છે
         run: python master_bot_final.py
