@@ -1,0 +1,24 @@
+name: Content Creation Auto Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '40 * * * *'
+
+jobs:
+  run_bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.10'
+      - name: Install Libraries
+        run: pip install gspread google-auth google-api-python-client oauth2client requests
+      - name: Run Master Bot
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          # આ તમારો Content Sheet ID છે
+          SPREADSHEET_ID: '1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY'
+        run: python master_bot.py
