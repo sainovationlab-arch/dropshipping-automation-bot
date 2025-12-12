@@ -69,7 +69,7 @@ def instagram_post(row, row_num):
     
     if not page_id:
         print(f"⚠️ No Instagram ID found for {account_name}")
-        return None # Return None on failure
+        return None 
         
     video_url = row.get('Video_URL')
     caption = row.get('Caption', '')
@@ -92,6 +92,7 @@ def instagram_post(row, row_num):
             print(f"❌ IG Init Failed: {response}")
             return None
 
+        # --- મહત્વનો સુધારો: 60 સેકન્ડ રાહ જુઓ ---
         print(f"   - Container Created: {creation_id}. Waiting 60s for processing...")
         time.sleep(60) 
         
@@ -103,8 +104,7 @@ def instagram_post(row, row_num):
         
         if pub_res.get('id'):
             print(f"✅ IG Published! ID: {pub_res['id']}")
-            # Instagram post link logic is complex, returning generic success for now
-            return "IG_SUCCESS" 
+            return "IG_SUCCESS"
         else:
             print(f"❌ IG Publish Failed: {pub_res}")
             return None
@@ -128,11 +128,8 @@ def youtube_post(row, row_num):
         return None
 
     base_title = row.get('Base_Title', 'New Video')
-    keywords = ["Best", "Top", "Amazing", "Awesome", "New", "Latest"]
-    title_parts = base_title.split()
-    if title_parts and title_parts[0] in keywords:
-        title_parts[0] = random.choice([k for k in keywords if k != title_parts[0]])
-    final_title = f"{' '.join(title_parts)} | {row.get('Account_Name')}"[:100]
+    # Title Variation logic removed for simplicity/accuracy or can be kept simple
+    final_title = f"{base_title} | {row.get('Account_Name')}"[:100]
 
     description = row.get('Caption', '')
     tags = str(row.get('Tags', 'shorts,viral')).split(',')
@@ -159,7 +156,8 @@ def youtube_post(row, row_num):
         
         video_id = resp.get('id')
         print(f"✅ YouTube Upload Success! ID: {video_id}")
-        return f"https://youtu.be/{video_id}" # Return the actual link
+        # --- મહત્વનો સુધારો: લિંક રિટર્ન કરો ---
+        return f"https://youtu.be/{video_id}" 
         
     except Exception as e:
         print(f"❌ YouTube Upload Error: {e}")
@@ -181,26 +179,19 @@ def run_master_automation():
             
         headers = list(data[0].keys())
         
-        # Find column indices
-        try:
-            # Finding indices in the actual sheet header row (1-based)
-            sheet_headers = sheet.row_values(1)
-            
-            # Helper to find index case-insensitively
-            def get_col_idx(name):
-                return next(i for i, v in enumerate(sheet_headers) if v.lower() == name.lower()) + 1
-
-            status_col_idx = get_col_idx('Status')
-            
-            # Try to find 'Link' column, if not, try 'Video URL' as fallback (or just print)
+        # Helper to find column index (1-based)
+        sheet_headers = sheet.row_values(1)
+        
+        def get_col_idx(name):
             try:
-                link_col_idx = get_col_idx('Link') 
-            except:
-                link_col_idx = None
-                print("⚠️ 'Link' column not found. Video link will not be saved.")
+                return next(i for i, v in enumerate(sheet_headers) if v.lower() == name.lower()) + 1
+            except: return None
 
-        except Exception as e:
-            print(f"❌ Column Error: {e}. Make sure 'Status' column exists.")
+        status_col_idx = get_col_idx('Status')
+        link_col_idx = get_col_idx('Link') # લિંક સેવ કરવા માટેનું કોલમ
+
+        if not status_col_idx:
+            print("❌ Error: 'Status' column not found.")
             return
 
     except Exception as e:
@@ -211,15 +202,16 @@ def run_master_automation():
 
     for i, row in enumerate(data):
         row_num = i + 2
-        # Use header keys to get data safely
+        
+        # Flexible key finding for Status
         status_key = next((h for h in headers if h.lower() == 'status'), None)
         current_status = str(row.get(status_key, '')).strip().upper()
         
         if current_status == 'PENDING' or current_status == 'FAIL':
             
-            # Find Platform key
+            # Flexible key finding for Platform
             platform_key = next((h for h in headers if h.lower() == 'platform'), None)
-            platform = str(row.get(platform_key, '')).strip().lower() if platform_key else ""
+            platform = str(row.get(platform_key, '')).strip().lower()
             
             if not platform: continue
             if current_status == 'DONE': continue
@@ -233,11 +225,11 @@ def run_master_automation():
                 result_link = youtube_post(row, row_num)
             
             if result_link:
-                # Update Status
+                # Update Status to DONE
                 sheet.update_cell(row_num, status_col_idx, 'DONE')
                 
-                # Update Link if column exists and we have a YouTube link
-                if link_col_idx and "youtu" in str(result_link):
+                # Update Link if we have a valid URL and column exists
+                if link_col_idx and "http" in str(result_link):
                     sheet.update_cell(row_num, link_col_idx, result_link)
                     
                 print(f"✅ Row {row_num} DONE. Link: {result_link}")
