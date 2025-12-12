@@ -1,0 +1,25 @@
+name: Dropshipping Auto Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 * * * *'
+
+jobs:
+  run_bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.10'
+      - name: Install Libraries
+        run: pip install gspread google-auth google-api-python-client oauth2client requests
+      - name: Run Master Bot
+        env:
+          # અહીં ફાઈલ નથી બનતી, સીધું Secret વંચાય છે
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          # આ તમારો Dropshipping Sheet ID છે (જે તમે txt ફાઇલમાં આપ્યો હતો)
+          SPREADSHEET_ID: '17XTdZkbnHPUgUhOVzAtUDM76YFhM0Yh9UBABHAa_hAA'
+        run: python master_bot.py
