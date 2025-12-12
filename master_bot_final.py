@@ -64,35 +64,28 @@ def get_youtube_service():
         print(f"❌ YouTube Auth Error: {e}")
         return None
 
-# --- INSTAGRAM SPECIAL: Drive Link -> Direct Link Converter ---
-def get_direct_drive_link(url):
-    """Google Drive Link ને Direct Download Link માં ફેરવે છે."""
-    if "drive.google.com" in url:
-        try:
-            # File ID શોધો
-            file_id = url.split('/d/')[1].split('/')[0]
-            # Direct Link બનાવો
-            return f"https://drive.google.com/uc?export=download&id={file_id}"
-        except:
-            return url # જો ફોર્મેટ અલગ હોય તો ઓરિજિનલ પાછી આપો
-    return url
-
-# --- YOUTUBE SPECIAL: File Downloader ---
+# --- SMART DOWNLOADER (The Weapon) ---
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def download_video(url):
-    print(f"⬇️ Downloading video for YouTube...")
+    print(f"⬇️ Downloading video from: {url}")
+    # રેન્ડમ નામ આપો જેથી ફાઈલ મિક્સ ન થાય
     output_file = f"video_{random.randint(1000, 9999)}.mp4"
+    
     try:
         if "drive.google.com" in url:
             gdown.download(url, output_file, quiet=False, fuzzy=True)
         else:
             response = requests.get(url, stream=True)
             with open(output_file, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192): f.write(chunk)
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
         
         if os.path.exists(output_file) and os.path.getsize(output_file) > 1000:
+            print(f"✅ Downloaded: {output_file} ({os.path.getsize(output_file)} bytes)")
             return output_file
-        return None
+        else:
+            print("❌ Download Failed: File is empty.")
+            return None
     except Exception as e:
         print(f"❌ Download Error: {e}")
         if os.path.exists(output_file): os.remove(output_file)
@@ -113,35 +106,60 @@ def instagram_post(row, row_num):
     video_url = row.get('Video_URL')
     caption = row.get('Caption', '')
     
-    # --- ફિક્સ: Direct Link વાપરો ---
-    direct_url = get_direct_drive_link(video_url)
-    print(f"📸 Posting to Instagram: {account_name} using Direct Link...")
+    print(f"📸 Posting to Instagram: {account_name}...")
+
+    # ૧. વિડિયો ડાઉનલોડ કરો (Step 1: Download)
+    local_file = download_video(video_url)
+    if not local_file: return None
 
     try:
-        # ૧. ઈન્સ્ટાગ્રામને લિંક આપો (ફાઈલ નહીં)
+        # ૨. અપલોડ સેશન શરૂ કરો (Step 2: Initialize Resumable Upload)
+        # આપણે 'upload_type=resumable' વાપરીશું જેથી લિંકની જરૂર ન પડે
         url = f"https://graph.facebook.com/v19.0/{page_id}/media"
         params = {
             'access_token': FB_ACCESS_TOKEN,
-            'caption': caption,
+            'upload_type': 'resumable',
             'media_type': 'REELS',
-            'video_url': direct_url # <--- Direct Link Here
+            'caption': caption
         }
-        response = requests.post(url, data=params).json()
-        creation_id = response.get('id')
+        
+        # ખાલી વિનંતી મોકલો સેશન માટે
+        init_res = requests.post(url, params=params).json()
+        upload_uri = init_res.get('uri')
+        video_id = init_res.get('id')
 
-        if not creation_id:
-            print(f"❌ IG Init Failed: {response}")
+        if not upload_uri or not video_id:
+            print(f"❌ IG Init Failed: {init_res}")
+            if os.path.exists(local_file): os.remove(local_file)
             return None
 
-        # ૨. રાહ જુઓ (60 સેકન્ડ)
-        print(f"   - Container: {creation_id}. Waiting 60s for transcoding...")
+        # ૩. વિડિયો અપલોડ કરો (Step 3: Upload Bytes)
+        print(f"   - Uploading bytes to Instagram...")
+        file_size = os.path.getsize(local_file)
+        
+        with open(local_file, 'rb') as f:
+            headers = {
+                'Authorization': f'OAuth {FB_ACCESS_TOKEN}',
+                'file_offset': '0'
+            }
+            upload_res = requests.post(upload_uri, data=f, headers=headers)
+        
+        if upload_res.status_code != 200:
+            print(f"❌ Upload Bytes Failed: {upload_res.text}")
+            if os.path.exists(local_file): os.remove(local_file)
+            return None
+
+        # ૪. પબ્લિશ કરો (Step 4: Publish)
+        print(f"   - Uploaded. ID: {video_id}. Waiting 60s for transcoding...")
         time.sleep(60) 
         
-        # ૩. પબ્લિશ કરો
         pub_url = f"https://graph.facebook.com/v19.0/{page_id}/media_publish"
-        pub_params = {'creation_id': creation_id, 'access_token': FB_ACCESS_TOKEN}
+        pub_params = {'creation_id': video_id, 'access_token': FB_ACCESS_TOKEN}
         pub_res = requests.post(pub_url, params=pub_params).json()
         
+        # ફાઈલ સાફ કરો
+        if os.path.exists(local_file): os.remove(local_file)
+
         if pub_res.get('id'):
             print(f"✅ IG Published! ID: {pub_res['id']}")
             return "IG_SUCCESS"
@@ -151,6 +169,7 @@ def instagram_post(row, row_num):
 
     except Exception as e:
         print(f"❌ IG Error: {e}")
+        if os.path.exists(local_file): os.remove(local_file)
         return None
 
 def youtube_post(row, row_num):
@@ -159,7 +178,7 @@ def youtube_post(row, row_num):
 
     video_url = row.get('Video_URL')
     
-    # --- ફિક્સ: YouTube માટે ડાઉનલોડ કરો ---
+    # ૧. વિડિયો ડાઉનલોડ કરો
     local_file = download_video(video_url)
     if not local_file: return None
 
@@ -179,6 +198,7 @@ def youtube_post(row, row_num):
     }
 
     print("🚀 Uploading to YouTube...")
+    # સુધારો: MediaFileUpload વાપરો
     media = MediaFileUpload(local_file, chunksize=-1, resumable=True)
     
     try:
@@ -186,7 +206,8 @@ def youtube_post(row, row_num):
         resp = None
         while resp is None:
             status, resp = req.next_chunk()
-            if status: print(f"   - Uploading {int(status.progress() * 100)}%...")
+            if status:
+                print(f"   - Uploading {int(status.progress() * 100)}%...")
         
         video_id = resp.get('id')
         print(f"✅ YouTube Upload Success! ID: {video_id}")
@@ -200,7 +221,7 @@ def youtube_post(row, row_num):
         return None
 
 # ==============================================================================
-# 3. MAIN AUTOMATION
+# 3. MAIN AUTOMATION ENGINE
 # ==============================================================================
 
 def run_master_automation():
@@ -209,7 +230,10 @@ def run_master_automation():
 
     try:
         data = sheet.get_all_records()
-        if not data: return
+        if not data:
+            print("No data found.")
+            return
+            
         headers = list(data[0].keys())
         sheet_headers = sheet.row_values(1)
         
@@ -232,6 +256,7 @@ def run_master_automation():
 
     for i, row in enumerate(data):
         row_num = i + 2
+        
         status_key = next((h for h in headers if h.lower() == 'status'), None)
         current_status = str(row.get(status_key, '')).strip().upper()
         
