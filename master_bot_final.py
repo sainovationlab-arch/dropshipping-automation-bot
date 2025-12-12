@@ -69,7 +69,7 @@ def instagram_post(row, row_num):
     
     if not page_id:
         print(f"⚠️ No Instagram ID found for {account_name}")
-        return False
+        return None # Return None on failure
         
     video_url = row.get('Video_URL')
     caption = row.get('Caption', '')
@@ -90,13 +90,12 @@ def instagram_post(row, row_num):
 
         if not creation_id:
             print(f"❌ IG Init Failed: {response}")
-            return False
+            return None
 
         print(f"   - Container Created: {creation_id}. Waiting 60s for processing...")
-        
-        # 2. Wait & Publish (Increased to 60s)
         time.sleep(60) 
         
+        # 2. Publish
         pub_url = f"https://graph.facebook.com/v19.0/{page_id}/media_publish"
         pub_params = {'creation_id': creation_id, 'access_token': FB_ACCESS_TOKEN}
         
@@ -104,18 +103,19 @@ def instagram_post(row, row_num):
         
         if pub_res.get('id'):
             print(f"✅ IG Published! ID: {pub_res['id']}")
-            return True
+            # Instagram post link logic is complex, returning generic success for now
+            return "IG_SUCCESS" 
         else:
             print(f"❌ IG Publish Failed: {pub_res}")
-            return False
+            return None
 
     except Exception as e:
         print(f"❌ IG Error: {e}")
-        return False
+        return None
 
 def youtube_post(row, row_num):
     youtube = get_youtube_service()
-    if not youtube: return False
+    if not youtube: return None
 
     video_url = row.get('Video_URL')
     print(f"🎥 Downloading video for YouTube from {video_url}...")
@@ -125,7 +125,7 @@ def youtube_post(row, row_num):
         video_response.raise_for_status()
     except Exception as e:
         print(f"❌ Download Failed: {e}")
-        return False
+        return None
 
     base_title = row.get('Base_Title', 'New Video')
     keywords = ["Best", "Top", "Amazing", "Awesome", "New", "Latest"]
@@ -157,11 +157,13 @@ def youtube_post(row, row_num):
             if status:
                 print(f"   - Uploading {int(status.progress() * 100)}%...")
         
-        print(f"✅ YouTube Upload Success! ID: {resp.get('id')}")
-        return True
+        video_id = resp.get('id')
+        print(f"✅ YouTube Upload Success! ID: {video_id}")
+        return f"https://youtu.be/{video_id}" # Return the actual link
+        
     except Exception as e:
         print(f"❌ YouTube Upload Error: {e}")
-        return False
+        return None
 
 # ==============================================================================
 # 3. MAIN AUTOMATION ENGINE
@@ -178,17 +180,27 @@ def run_master_automation():
             return
             
         headers = list(data[0].keys())
-        status_key = next((h for h in headers if h.lower() == 'status'), None)
         
-        if not status_key:
-            print("❌ Error: 'Status' column not found.")
-            return
-
-        sheet_headers = sheet.row_values(1)
+        # Find column indices
         try:
-            status_col_idx = next(i for i, v in enumerate(sheet_headers) if v.lower() == 'status') + 1
-        except:
-            print("Could not find Status column index.")
+            # Finding indices in the actual sheet header row (1-based)
+            sheet_headers = sheet.row_values(1)
+            
+            # Helper to find index case-insensitively
+            def get_col_idx(name):
+                return next(i for i, v in enumerate(sheet_headers) if v.lower() == name.lower()) + 1
+
+            status_col_idx = get_col_idx('Status')
+            
+            # Try to find 'Link' column, if not, try 'Video URL' as fallback (or just print)
+            try:
+                link_col_idx = get_col_idx('Link') 
+            except:
+                link_col_idx = None
+                print("⚠️ 'Link' column not found. Video link will not be saved.")
+
+        except Exception as e:
+            print(f"❌ Column Error: {e}. Make sure 'Status' column exists.")
             return
 
     except Exception as e:
@@ -199,31 +211,36 @@ def run_master_automation():
 
     for i, row in enumerate(data):
         row_num = i + 2
+        # Use header keys to get data safely
+        status_key = next((h for h in headers if h.lower() == 'status'), None)
         current_status = str(row.get(status_key, '')).strip().upper()
         
-        # PENDING કે FAIL હોય તો ફરી ટ્રાય કરો
         if current_status == 'PENDING' or current_status == 'FAIL':
             
-            platform = ""
-            for key in row.keys():
-                if key.lower() == 'platform':
-                    platform = str(row.get(key, '')).strip().lower()
-                    break
+            # Find Platform key
+            platform_key = next((h for h in headers if h.lower() == 'platform'), None)
+            platform = str(row.get(platform_key, '')).strip().lower() if platform_key else ""
             
             if not platform: continue
             if current_status == 'DONE': continue
 
             print(f"Processing Row {row_num}: {platform}")
-            success = False
+            result_link = None
             
             if 'instagram' in platform or 'facebook' in platform:
-                success = instagram_post(row, row_num)
+                result_link = instagram_post(row, row_num)
             elif 'youtube' in platform:
-                success = youtube_post(row, row_num)
+                result_link = youtube_post(row, row_num)
             
-            if success:
+            if result_link:
+                # Update Status
                 sheet.update_cell(row_num, status_col_idx, 'DONE')
-                print(f"✅ Row {row_num} DONE")
+                
+                # Update Link if column exists and we have a YouTube link
+                if link_col_idx and "youtu" in str(result_link):
+                    sheet.update_cell(row_num, link_col_idx, result_link)
+                    
+                print(f"✅ Row {row_num} DONE. Link: {result_link}")
             else:
                 sheet.update_cell(row_num, status_col_idx, 'FAIL')
                 print(f"❌ Row {row_num} FAIL")
