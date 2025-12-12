@@ -1,4 +1,4 @@
-name: Dropshipping Auto Bot
+name: Dropshipping Auto Bot (Final)
 
 on:
   workflow_dispatch:
@@ -18,8 +18,8 @@ jobs:
         run: pip install gspread google-auth google-api-python-client oauth2client requests
       - name: Run Master Bot
         env:
-          # અહીં ફાઈલ નથી બનતી, સીધું Secret વંચાય છે
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          # આ તમારો Dropshipping Sheet ID છે (જે તમે txt ફાઇલમાં આપ્યો હતો)
+          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+          FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
           SPREADSHEET_ID: '17XTdZkbnHPUgUhOVzAtUDM76YFhM0Yh9UBABHAa_hAA'
-        run: python master_bot.py
+        run: python master_bot_final.py
