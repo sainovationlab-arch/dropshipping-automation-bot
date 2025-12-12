@@ -64,29 +64,24 @@ def get_youtube_service():
         print(f"❌ YouTube Auth Error: {e}")
         return None
 
-# --- SMART DOWNLOADER (gdown) ---
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def download_video(url):
     print(f"⬇️ Downloading video from: {url}")
     output_file = f"video_{random.randint(1000, 9999)}.mp4"
-    
     try:
-        # Google Drive Links માટે gdown
         if "drive.google.com" in url:
             gdown.download(url, output_file, quiet=False, fuzzy=True)
         else:
-            # Direct Links માટે requests
             response = requests.get(url, stream=True)
             with open(output_file, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
         
-        # ફાઈલ સાઈઝ ચેક
         if os.path.exists(output_file) and os.path.getsize(output_file) > 1000:
             print(f"✅ Downloaded: {output_file} ({os.path.getsize(output_file)} bytes)")
             return output_file
         else:
-            print("❌ Download Failed: File is empty or restricted.")
+            print("❌ Download Failed: File is empty.")
             return None
     except Exception as e:
         print(f"❌ Download Error: {e}")
@@ -94,7 +89,7 @@ def download_video(url):
         raise e
 
 # ==============================================================================
-# 3. POSTING FUNCTIONS (RESUMABLE UPLOAD - THE FIX)
+# 3. POSTING FUNCTIONS (HEADER FIXED)
 # ==============================================================================
 
 def instagram_post(row, row_num):
@@ -110,13 +105,12 @@ def instagram_post(row, row_num):
     
     print(f"📸 Posting to Instagram: {account_name}...")
 
-    # 1. વિડિયો ડાઉનલોડ કરો (Step 1: Download)
+    # 1. Download Video
     local_file = download_video(video_url)
     if not local_file: return None
 
     try:
-        # 2. અપલોડ સેશન શરૂ કરો (Step 2: Initialize Resumable Upload)
-        # આપણે 'upload_type=resumable' વાપરીશું
+        # 2. Start Session
         url = f"https://graph.facebook.com/v19.0/{page_id}/media"
         params = {
             'access_token': FB_ACCESS_TOKEN,
@@ -125,7 +119,6 @@ def instagram_post(row, row_num):
             'caption': caption
         }
         
-        # સેશન બનાવો
         init_res = requests.post(url, params=params).json()
         upload_uri = init_res.get('uri')
         video_id = init_res.get('id')
@@ -135,13 +128,15 @@ def instagram_post(row, row_num):
             if os.path.exists(local_file): os.remove(local_file)
             return None
 
-        # 3. વિડિયો અપલોડ કરો (Step 3: Upload Bytes)
+        # 3. Upload Bytes (HEADER FIX HERE)
         print(f"   - Uploading bytes to Instagram...")
+        file_size = os.path.getsize(local_file)
         
         with open(local_file, 'rb') as f:
             headers = {
                 'Authorization': f'OAuth {FB_ACCESS_TOKEN}',
-                'file_offset': '0'
+                'offset': '0',             # <--- આ સુધાર્યું (પહેલા file_offset હતું)
+                'file_size': str(file_size) # <--- આ નવું ઉમેર્યું (સેફ્ટી માટે)
             }
             upload_res = requests.post(upload_uri, data=f, headers=headers)
         
@@ -150,13 +145,9 @@ def instagram_post(row, row_num):
             if os.path.exists(local_file): os.remove(local_file)
             return None
 
-        # 4. પબ્લિશ કરો (Step 4: Publish)
-        print(f"   - Uploaded. ID: {video_id}. Waiting 60s for transcoding...")
-        
-        # ફાઈલનું કામ પતી ગયું, ડિલીટ કરો
+        # 4. Publish
+        print(f"   - Uploaded. ID: {video_id}. Waiting 60s...")
         if os.path.exists(local_file): os.remove(local_file)
-        
-        # Instagram ને પ્રોસેસિંગ માટે સમય આપવો જરૂરી છે
         time.sleep(60) 
         
         pub_url = f"https://graph.facebook.com/v19.0/{page_id}/media_publish"
@@ -180,8 +171,6 @@ def youtube_post(row, row_num):
     if not youtube: return None
 
     video_url = row.get('Video_URL')
-    
-    # 1. વિડિયો ડાઉનલોડ કરો
     local_file = download_video(video_url)
     if not local_file: return None
 
@@ -208,8 +197,7 @@ def youtube_post(row, row_num):
         resp = None
         while resp is None:
             status, resp = req.next_chunk()
-            if status:
-                print(f"   - Uploading {int(status.progress() * 100)}%...")
+            if status: print(f"   - Uploading {int(status.progress() * 100)}%...")
         
         video_id = resp.get('id')
         print(f"✅ YouTube Upload Success! ID: {video_id}")
