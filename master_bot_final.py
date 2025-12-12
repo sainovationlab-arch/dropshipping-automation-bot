@@ -3,6 +3,7 @@ import requests
 import json
 import random
 import os
+import time
 from io import BytesIO
 from googleapiclient.http import MediaIoBaseUpload
 from googleapiclient.discovery import build
@@ -18,14 +19,14 @@ GCP_CREDENTIALS_JSON = os.environ.get("GCP_CREDENTIALS")
 YOUTUBE_TOKEN_JSON = os.environ.get("YOUTUBE_TOKEN_JSON")
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# તમારી જૂની ફાઈલમાંથી લીધેલા IDs
+# 👇 તમારા સાચા Page IDs (જે જૂના કોડમાં હતા તે મેં અહીં સાચવી લીધા છે)
 INSTAGRAM_IDS = {
     "Emerald Edge": "17841478369307404",
     "Urban Glint": "17841479492205083",
     "Diamond Dice": "17841478369307404",
     "Grand Orbit": "17841479516066757",
     "Opus": "17841479493645419",
-    "Opus Elite": "17841479493645419", # નામમાં ફેરફાર હોય તો બંને રાખ્યા છે
+    "Opus Elite": "17841479493645419",
     "Pearl Verse": "17841478822408000",
     "Royal Nexus": "17841479056452004",
     "Luxivibe": "17841479492205083"
@@ -64,7 +65,7 @@ def get_youtube_service():
         return None
 
 # ==============================================================================
-# 2. POSTING FUNCTIONS
+# 2. POSTING FUNCTIONS (Your Successful Logic)
 # ==============================================================================
 
 def instagram_post(row, row_num):
@@ -81,7 +82,7 @@ def instagram_post(row, row_num):
     print(f"📸 Posting to Instagram: {account_name}...")
 
     try:
-        # 1. Container Create
+        # 1. Container Create (This is your proven logic)
         url = f"https://graph.facebook.com/v19.0/{page_id}/media"
         params = {
             'access_token': FB_ACCESS_TOKEN,
@@ -89,7 +90,6 @@ def instagram_post(row, row_num):
             'media_type': 'REELS',
             'video_url': video_url 
         }
-        # આપણે URL વાપરીએ છીએ એટલે ફાઈલ ડાઉનલોડ કરવાની જરૂર નથી
         response = requests.post(url, data=params).json()
         creation_id = response.get('id')
 
@@ -97,15 +97,13 @@ def instagram_post(row, row_num):
             print(f"❌ IG Init Failed: {response}")
             return False
 
-        print(f"   - Container Created: {creation_id}. Publishing...")
+        print(f"   - Container Created: {creation_id}. Waiting for processing...")
         
-        # 2. Publish
+        # 2. Wait & Publish
+        time.sleep(15) # Wait for video to process
+        
         pub_url = f"https://graph.facebook.com/v19.0/{page_id}/media_publish"
         pub_params = {'creation_id': creation_id, 'access_token': FB_ACCESS_TOKEN}
-        
-        # થોડી રાહ જુઓ જેથી વીડિયો પ્રોસેસ થાય
-        import time
-        time.sleep(10)
         
         pub_res = requests.post(pub_url, params=pub_params).json()
         
@@ -128,19 +126,28 @@ def youtube_post(row, row_num):
     print(f"🎥 Downloading video for YouTube from {video_url}...")
     
     try:
+        # Download logic
         video_response = requests.get(video_url)
         video_response.raise_for_status()
     except Exception as e:
         print(f"❌ Download Failed: {e}")
         return False
 
-    title = row.get('Base_Title', 'New Video')
+    # Title Variation Logic
+    base_title = row.get('Base_Title', 'New Video')
+    keywords = ["Best", "Top", "Amazing", "Awesome", "New", "Latest"]
+    title_parts = base_title.split()
+    if title_parts and title_parts[0] in keywords:
+        title_parts[0] = random.choice([k for k in keywords if k != title_parts[0]])
+    final_title = f"{' '.join(title_parts)} | {row.get('Account_Name')}"[:100]
+
     description = row.get('Caption', '')
-    tags = row.get('Tags', '').split(',')
+    # Check if 'Tags' column exists, otherwise use default
+    tags = str(row.get('Tags', 'shorts,viral')).split(',')
 
     body = {
         'snippet': {
-            'title': title,
+            'title': final_title,
             'description': description,
             'categoryId': '22',
             'tags': tags
@@ -165,7 +172,7 @@ def youtube_post(row, row_num):
         return False
 
 # ==============================================================================
-# 3. MAIN AUTOMATION
+# 3. MAIN AUTOMATION ENGINE
 # ==============================================================================
 
 def run_master_automation():
@@ -173,17 +180,29 @@ def run_master_automation():
     if not sheet: return
 
     try:
-        # Headers Fix (તમારી શીટમાં headers સાચા છે કે નહિ તે ચેક કરો)
-        # આપણે ધારીએ છીએ કે 1st row માં headers છે: Status, Platform, etc.
+        # Headers Validation
         data = sheet.get_all_records()
-        headers = sheet.row_values(1)
+        if not data:
+            print("No data found in sheet.")
+            return
+            
+        # Get actual headers from the first row of data keys
+        headers = list(data[0].keys())
         
-        # Status column index શોધો
-        try:
-            # Case insensitive search
-            status_idx = next(i for i, v in enumerate(headers) if v.lower() == 'status') + 1
-        except StopIteration:
+        # Helper to find column name regardless of case (Status vs status)
+        status_key = next((h for h in headers if h.lower() == 'status'), None)
+        
+        if not status_key:
             print("❌ Error: 'Status' column not found.")
+            return
+
+        # Column index for update (1-based)
+        # We need to find the index in the actual sheet headers row
+        sheet_headers = sheet.row_values(1)
+        try:
+            status_col_idx = next(i for i, v in enumerate(sheet_headers) if v.lower() == 'status') + 1
+        except:
+            print("Could not find Status column index.")
             return
 
     except Exception as e:
@@ -194,22 +213,34 @@ def run_master_automation():
 
     for i, row in enumerate(data):
         row_num = i + 2
-        current_status = str(row.get('Status', '')).strip().upper()
+        current_status = str(row.get(status_key, '')).strip().upper()
         
         if current_status == 'PENDING' or current_status == 'FAIL':
-            platform = str(row.get('Platform', '')).strip().lower()
             
+            # Platform check logic
+            platform = ""
+            for key in row.keys():
+                if key.lower() == 'platform':
+                    platform = str(row.get(key, '')).strip().lower()
+                    break
+            
+            if not platform: continue
+
+            if current_status == 'DONE': continue
+
+            print(f"Processing Row {row_num}: {platform}")
             success = False
-            if 'instagram' in platform:
+            
+            if 'instagram' in platform or 'facebook' in platform:
                 success = instagram_post(row, row_num)
             elif 'youtube' in platform:
                 success = youtube_post(row, row_num)
             
             if success:
-                sheet.update_cell(row_num, status_idx, 'DONE')
+                sheet.update_cell(row_num, status_col_idx, 'DONE')
                 print(f"✅ Row {row_num} DONE")
             else:
-                sheet.update_cell(row_num, status_idx, 'FAIL')
+                sheet.update_cell(row_num, status_col_idx, 'FAIL')
                 print(f"❌ Row {row_num} FAIL")
 
 if __name__ == "__main__":
