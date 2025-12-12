@@ -4,7 +4,8 @@ import json
 import random
 import os
 import time
-import gdown  # <--- સ્પેશિયલ ડાઉનલોડર
+import gdown  # <--- નવું હથિયાર (Drive Downloader)
+from tenacity import retry, stop_after_attempt, wait_fixed # <--- નવું હથિયાર (Auto Retry)
 from io import BytesIO
 from googleapiclient.http import MediaIoBaseUpload
 from googleapiclient.discovery import build
@@ -64,15 +65,17 @@ def get_youtube_service():
         print(f"❌ YouTube Auth Error: {e}")
         return None
 
+# --- POWERFUL DOWNLOADER FUNCTION ---
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def download_video(url):
-    """ડ્રાઈવ લિંક અને ડાયરેક્ટ લિંક બંનેને હેન્ડલ કરે છે."""
+    """Smart Downloader: Handles Drive Links & Direct Links"""
     print(f"⬇️ Downloading video from: {url}")
     output_file = "temp_video.mp4"
     
     try:
-        # જો Google Drive લિંક હોય તો gdown વાપરો
+        # જો Google Drive લિંક હોય તો gdown વાપરો (આ જ તમારી સમસ્યાનો ઉકેલ છે)
         if "drive.google.com" in url:
-            # fuzzy=True એટલે પરમિશનના ઈશ્યુ હોય તો પણ પ્રયત્ન કરશે
+            # fuzzy=True એટલે પરમિશનના નાના ઈશ્યુ હોય તો પણ ડાઉનલોડ કરશે
             gdown.download(url, output_file, quiet=False, fuzzy=True)
         else:
             # સાદી લિંક હોય તો requests વાપરો
@@ -82,7 +85,7 @@ def download_video(url):
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
         
-        # ફાઈલ ચેક કરો
+        # ફાઈલ ચેક કરો (કે તે ખાલી તો નથી ને)
         if os.path.exists(output_file) and os.path.getsize(output_file) > 1000:
             print(f"✅ Download Successful! Size: {os.path.getsize(output_file)} bytes")
             return output_file
@@ -92,7 +95,7 @@ def download_video(url):
             
     except Exception as e:
         print(f"❌ Download Error: {e}")
-        return None
+        raise e # Retry if failed
 
 # ==============================================================================
 # 3. POSTING FUNCTIONS
@@ -109,22 +112,14 @@ def instagram_post(row, row_num):
     video_url = row.get('Video_URL')
     caption = row.get('Caption', '')
     
-    # ઈન્સ્ટાગ્રામ માટે આપણને પબ્લિક URL જોઈએ, પણ જો ડ્રાઈવ લિંક હોય તો તે ડાયરેક્ટ ચાલતી નથી.
-    # ગ્રાફ API માટે વિડિયો પબ્લિક હોવો જરૂરી છે. 
-    # અહીં આપણે ડાઉનલોડ કરીને અપલોડ કરવાની કોશિશ કરીએ છીએ (Container Upload logic slightly different for local file)
-    # અત્યારે આપણે ડાયરેક્ટ URL જ વાપરીશું, પણ જો તે ડ્રાઈવની હોય તો ફેલ થશે.
-    # ઇન્સ્ટાગ્રામ માટે તમારે 'Direct Download Link' વાપરવી પડે અથવા વિડિયો કોઈ પબ્લિક સર્વર પર હોવો જોઈએ.
-    # ગૂગલ ડ્રાઈવની લિંક ઇન્સ્ટાગ્રામ API સીધી સ્વીકારતું નથી.
-    
-    # જો કે, YouTube માટે આપણે ફાઈલ ડાઉનલોડ કરીને મોકલી શકીએ છીએ.
-    # ઇન્સ્ટાગ્રામ માટે આપણે ડ્રાઈવ લિંકને 'Direct Link' માં ફેરવવી પડે.
-    
     print(f"📸 Posting to Instagram: {account_name}...")
 
-    # ડ્રાઈવ લિંક ફિક્સ (Hack for Drive Links on Insta API)
+    # ડ્રાઈવ લિંક હોય તો તેને ડાયરેક્ટ ડાઉનલોડ લિંકમાં ફેરવવાનો પ્રયાસ (Insta API માટે)
+    # નોંધ: Instagram API ને Direct Public URL જોઈએ. ડ્રાઈવ લિંક ક્યારેક અઘરી પડે છે.
+    # આપણે 'uc?export=download' ટ્રિક વાપરીશું.
     if "drive.google.com" in video_url and "/view" in video_url:
-        video_url = video_url.replace("/view", "/preview").replace("file/d/", "uc?export=download&id=")
-        # આ એક પ્રયાસ છે, પણ ડ્રાઈવ લિંક ઇન્સ્ટા પર અઘરી છે.
+        file_id = video_url.split('/d/')[1].split('/')[0]
+        video_url = f"https://drive.google.com/uc?export=download&id={file_id}"
 
     try:
         url = f"https://graph.facebook.com/v19.0/{page_id}/media"
@@ -141,7 +136,8 @@ def instagram_post(row, row_num):
             print(f"❌ IG Init Failed: {response}")
             return None
 
-        print(f"   - Container Created: {creation_id}. Waiting 60s...")
+        # --- POWERFUL WAIT: 60 Seconds ---
+        print(f"   - Container Created: {creation_id}. Waiting 60s for Facebook to process...")
         time.sleep(60) 
         
         pub_url = f"https://graph.facebook.com/v19.0/{page_id}/media_publish"
@@ -165,7 +161,7 @@ def youtube_post(row, row_num):
 
     video_url = row.get('Video_URL')
     
-    # --- ફિક્સ: સાચો વિડિયો ડાઉનલોડ કરો ---
+    # --- HERE IS THE MAGIC: Using gdown to get the REAL video ---
     local_file = download_video(video_url)
     if not local_file: return None
 
@@ -184,6 +180,7 @@ def youtube_post(row, row_num):
         'status': {'privacyStatus': 'public'}
     }
 
+    print("🚀 Uploading to YouTube...")
     media = MediaIoBaseUpload(local_file, 'video/*', chunksize=-1, resumable=True)
     
     try:
@@ -197,7 +194,7 @@ def youtube_post(row, row_num):
         video_id = resp.get('id')
         print(f"✅ YouTube Upload Success! ID: {video_id}")
         
-        # ક્લીનઅપ
+        # ક્લીનઅપ (જગ્યા ખાલી કરો)
         if os.path.exists(local_file):
             os.remove(local_file)
             
@@ -218,7 +215,11 @@ def run_master_automation():
 
     try:
         data = sheet.get_all_records()
-        headers = list(data[0].keys()) if data else []
+        if not data:
+            print("No data found in sheet.")
+            return
+            
+        headers = list(data[0].keys())
         sheet_headers = sheet.row_values(1)
         
         def get_col_idx(name):
@@ -262,6 +263,7 @@ def run_master_automation():
             
             if result_link:
                 sheet.update_cell(row_num, status_col_idx, 'DONE')
+                # Save link if available
                 if link_col_idx and "http" in str(result_link):
                     sheet.update_cell(row_num, link_col_idx, result_link)
                 print(f"✅ Row {row_num} DONE. Link: {result_link}")
