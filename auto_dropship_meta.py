@@ -2,42 +2,52 @@ import gspread
 import requests
 import json
 import random
+import os
+import base64
 from io import BytesIO
 from googleapiclient.http import MediaIoBaseUpload
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 import time
-import os
 
 # ==============================================================================
-# FINAL CONFIGURATION
+# 1. ROBUST CONFIGURATION (No Files Needed)
 # ==============================================================================
 
-SERVICE_ACCOUNT_FILE = 'service_account_key.json' 
-SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID") 
+SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
+GCP_CREDENTIALS_JSON = os.environ.get("GCP_CREDENTIALS") # સીધું Secret માંથી વાંચશે
+
+# આ ફંક્શન ગેરંટી આપે છે કે ચાવી સાચી રીતે વંચાય
+def get_credentials():
+    try:
+        if not GCP_CREDENTIALS_JSON:
+            raise ValueError("GCP_CREDENTIALS secret is missing in GitHub!")
+        
+        # JSON લોડ કરો
+        creds_dict = json.loads(GCP_CREDENTIALS_JSON)
+        return Credentials.from_service_account_info(
+            creds_dict,
+            scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/youtube.force-ssl']
+        )
+    except json.JSONDecodeError:
+        print("❌ FATAL ERROR: Your GitHub Secret 'GCP_CREDENTIALS' is not a valid JSON.")
+        print("Please delete it and paste the content of your .json file exactly as is.")
+        return None
+    except Exception as e:
+        print(f"❌ Credential Error: {e}")
+        return None
 
 # Platform Configuration
 PLATFORM_CONFIG = {
     "instagram_tokens": {
-        # અહી તમારા સાચા Page ID અને Token હોવા જોઈએ
         "Luxivibe": {"page_id": "YOUR_PAGE_ID", "access_token": "YOUR_ACCESS_TOKEN"},
         "Urban Glint": {"page_id": "YOUR_PAGE_ID", "access_token": "YOUR_ACCESS_TOKEN"},
-    },
-    "youtube_channels": {
-        # જુઓ! હવે બધી ચેનલ માટે એક જ ફાઈલ વપરાશે
-        "Luxivibe": "service_account_key.json",
-        "Urban Glint": "service_account_key.json",
-        "Royal Nexus": "service_account_key.json",
-        "Grand Orbit": "service_account_key.json",
-        "Opus Elite": "service_account_key.json",
-        "Pearl Verse": "service_account_key.json",
-        "Diamond Dice": "service_account_key.json",
-        "Emerald Edge": "service_account_key.json"
+        # ... બાકીના બધા એકાઉન્ટ્સ અહીં
     }
 }
 
 # ==============================================================================
-# FUNCTIONS
+# 2. Smart AI Functions
 # ==============================================================================
 
 def generate_varied_title(base_title, account_name):
@@ -47,20 +57,20 @@ def generate_varied_title(base_title, account_name):
         title_parts[0] = random.choice([k for k in keywords if k != title_parts[0]])
     return f"{' '.join(title_parts)} | {account_name}"[:100]
 
+# ==============================================================================
+# 3. Posting Functions
+# ==============================================================================
+
 def instagram_post(post_data, config, row_num):
-    print(f"✅ Instagram posting successful for {post_data['Account_Name']}")
+    # (તમારો સ્ટાન્ડર્ડ Instagram કોડ)
+    print(f"✅ Instagram posting simulation for {post_data['Account_Name']}")
     return True 
 
-def youtube_post(post_data, config, row_num):
+def youtube_post(post_data, creds, row_num):
     account_name = post_data['Account_Name']
+    
+    # અહી કોઈ ફાઈલની જરૂર નથી, આપણે સીધા creds વાપરીશું
     try:
-        # હવે કોડ સીધી આ જ ફાઈલ વાપરશે
-        creds_file = 'service_account_key.json'
-        
-        creds = Credentials.from_service_account_file(
-            creds_file,
-            scopes=['https://www.googleapis.com/auth/youtube.force-ssl']
-        )
         youtube = build('youtube', 'v3', credentials=creds)
     except Exception as e:
         print(f"❌ YouTube Auth failed: {e}")
@@ -93,13 +103,20 @@ def youtube_post(post_data, config, row_num):
         print(f"❌ YouTube Upload failed: {e}")
         return False
 
+# ==============================================================================
+# 4. Main Automation Logic
+# ==============================================================================
+
 def run_master_automation():
     if not SPREADSHEET_ID:
         print("FATAL ERROR: SPREADSHEET_ID missing.")
         return
-        
+    
+    # ૧. ક્રેડેન્શિયલ મેળવો (ડાયરેક્ટ)
+    creds = get_credentials()
+    if not creds: return
+
     try:
-        creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=['https://www.googleapis.com/auth/spreadsheets'])
         client = gspread.authorize(creds)
         sheet = client.open_by_key(SPREADSHEET_ID).sheet1
         
@@ -107,7 +124,7 @@ def run_master_automation():
         try:
             status_col = headers.index('Status') + 1
         except ValueError:
-            print("ERROR: 'Status' column not found in sheet.")
+            print("ERROR: 'Status' column not found in sheet. Check headers (Status vs Status ).")
             return
             
         data = sheet.get_all_records()
@@ -121,9 +138,7 @@ def run_master_automation():
         row_num = i + 2 
         current_status = row.get('Status')
         
-        # FAIL થયેલી લાઈનોને પણ ફરી ટ્રાય કરશે
         if current_status == 'PENDING' or current_status == 'FAIL':
-            
             platform = row.get('Platform', '').strip()
             if current_status == 'DONE': continue
 
@@ -131,7 +146,8 @@ def run_master_automation():
             if platform.lower() == 'instagram':
                 success = instagram_post(row, PLATFORM_CONFIG, row_num)
             elif platform.lower() == 'youtube':
-                success = youtube_post(row, PLATFORM_CONFIG, row_num)
+                # YouTube માટે હવે આપણે સીધા creds પાસ કરીએ છીએ
+                success = youtube_post(row, creds, row_num)
             
             if success:
                 sheet.update_cell(row_num, status_col, 'DONE')
