@@ -1,39 +1,26 @@
-name: Auto Dropship Meta Timer (V2)
+name: Dropshipping Auto Bot (Final)
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '15 * * * *'  
+    - cron: '15 * * * *'
 
 jobs:
   run_bot:
     runs-on: ubuntu-latest
-    
     steps:
       - uses: actions/checkout@v3
-
       - name: Set up Python
         uses: actions/setup-python@v3
         with:
-          python-version: '3.10' 
-
+          python-version: '3.10'
       - name: Install Libraries
-        run: |
-          pip install gspread google-auth google-api-python-client oauth2client requests
-
-      - name: Create Service Account Key File
-        # આ સાચી અને સુરક્ષિત રીત છે (Environment Variable વાપરીને)
+        run: pip install gspread google-auth google-api-python-client oauth2client requests
+      - name: Run Master Bot
         env:
-          GCP_DATA: ${{ secrets.GCP_CREDENTIALS }}
-        run: |
-          echo "$GCP_DATA" > service_account_key.json
-          
-      - name: Run Auto Dropship Meta Bot
-        env:
+          # અહીં ફાઈલ નથી બનતી, સીધું Secret વંચાય છે
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+          FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
           SPREADSHEET_ID: '17XTdZkbnHPUgUhOVzAtUDM76YFhM0Yh9UBABHAa_hAA'
-        run: python auto_dropship_meta.py
-        
-      - name: Cleanup
-        if: always()
-        run: |
-          rm service_account_key.json
+        run: python master_bot_final.py
