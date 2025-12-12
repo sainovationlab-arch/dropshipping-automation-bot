@@ -12,18 +12,12 @@ from google.oauth2.service_account import Credentials as ServiceAccountCredentia
 from google.oauth2.credentials import Credentials as UserCredentials
 
 # ==============================================================================
-# 1. CONFIGURATION & MULTI-PROJECT SETUP
+# 1. CONFIGURATION & 8-CHANNEL SETUP
 # ==============================================================================
 
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 GCP_CREDENTIALS_JSON = os.environ.get("GCP_CREDENTIALS")
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
-
-# ચારેય પ્રોજેક્ટની ચાવીઓ લાવો
-YT_TOKEN_1 = os.environ.get("YOUTUBE_TOKEN_JSON")
-YT_TOKEN_2 = os.environ.get("YOUTUBE_TOKEN_2")
-YT_TOKEN_3 = os.environ.get("YOUTUBE_TOKEN_3")
-YT_TOKEN_4 = os.environ.get("YOUTUBE_TOKEN_4")
 
 INSTAGRAM_IDS = {
     "Emerald Edge": "17841478369307404",
@@ -37,20 +31,16 @@ INSTAGRAM_IDS = {
     "Luxivibe": "17841479492205083"
 }
 
-# સ્માર્ટ મેપિંગ: કયા એકાઉન્ટ માટે કયો પ્રોજેક્ટ વાપરવો
+# 👇 8 ચેનલનું સ્માર્ટ મેપિંગ
 YOUTUBE_PROJECT_MAP = {
-    "Luxivibe": YT_TOKEN_1,
-    "Urban Glint": YT_TOKEN_1,
-    
-    "Royal Nexus": YT_TOKEN_2,
-    "Grand Orbit": YT_TOKEN_2,
-    
-    "Opus": YT_TOKEN_3,
-    "Opus Elite": YT_TOKEN_3,
-    "Pearl Verse": YT_TOKEN_3,
-    
-    "Diamond Dice": YT_TOKEN_4,
-    "Emerald Edge": YT_TOKEN_4
+    "Pearl Verse": os.environ.get("YT_PEARL_VERSE"),
+    "Opus Elite": os.environ.get("YT_OPUS_ELITE"),
+    "Diamond Dice": os.environ.get("YT_DIAMOND_DICE"),
+    "Emerald Edge": os.environ.get("YT_EMERALD_EDGE"),
+    "Royal Nexus": os.environ.get("YT_ROYAL_NEXUS"),
+    "Grand Orbit": os.environ.get("YT_GRAND_ORBIT"),
+    "Urban Glint": os.environ.get("YT_URBAN_GLINT"),
+    "Luxivibe": os.environ.get("YT_LUXI_VIBE")
 }
 
 # ==============================================================================
@@ -74,13 +64,14 @@ def get_sheet_service():
         return None
 
 def get_youtube_service(account_name):
-    """Selects the correct YouTube Project based on Account Name."""
+    """Selects the correct YouTube Token based on Account Name."""
     try:
-        # એકાઉન્ટના નામ પરથી નક્કી કરો કે કઈ ચાવી વાપરવી
-        token_json = YOUTUBE_PROJECT_MAP.get(str(account_name).strip(), YT_TOKEN_1)
+        # નામ સાફ કરો (spaces વગેરે કાઢી નાખો)
+        clean_name = str(account_name).strip()
+        token_json = YOUTUBE_PROJECT_MAP.get(clean_name)
         
         if not token_json:
-            print(f"❌ No YouTube Token found for {account_name} (Check Secrets!)")
+            print(f"❌ No YouTube Token found for '{clean_name}'")
             return None
             
         token_dict = json.loads(token_json)
@@ -181,9 +172,12 @@ def instagram_post(row, row_num):
 
 def youtube_post(row, row_num):
     account_name = str(row.get('Account_Name', '')).strip()
-    # 👇 અહીં જાદુ થશે: એકાઉન્ટ મુજબ અલગ પ્રોજેક્ટ વપરાશે
+    
+    # 👇 અહીં જાદુ થશે: જે એકાઉન્ટ હશે, તેની જ ચાવી વપરાશે
     youtube = get_youtube_service(account_name)
-    if not youtube: return None
+    if not youtube: 
+        print(f"❌ Skipping YouTube for {account_name} (No Token)")
+        return None
 
     video_url = row.get('Video_URL')
     local_file = download_video(video_url)
