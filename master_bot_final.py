@@ -81,7 +81,7 @@ def download_video(url):
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
         
-        # ફાઈલ સાઈઝ ચેક (Empty File રોકવા માટે)
+        # ફાઈલ સાઈઝ ચેક
         if os.path.exists(output_file) and os.path.getsize(output_file) > 1000:
             print(f"✅ Downloaded: {output_file} ({os.path.getsize(output_file)} bytes)")
             return output_file
