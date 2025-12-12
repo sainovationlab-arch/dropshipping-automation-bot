@@ -4,6 +4,7 @@ import json
 import random
 import os
 import time
+import gdown  # <--- સ્પેશિયલ ડાઉનલોડર
 from io import BytesIO
 from googleapiclient.http import MediaIoBaseUpload
 from googleapiclient.discovery import build
@@ -30,6 +31,10 @@ INSTAGRAM_IDS = {
     "Royal Nexus": "17841479056452004",
     "Luxivibe": "17841479492205083"
 }
+
+# ==============================================================================
+# 2. HELPER FUNCTIONS
+# ==============================================================================
 
 def get_sheet_service():
     try:
@@ -59,8 +64,38 @@ def get_youtube_service():
         print(f"❌ YouTube Auth Error: {e}")
         return None
 
+def download_video(url):
+    """ડ્રાઈવ લિંક અને ડાયરેક્ટ લિંક બંનેને હેન્ડલ કરે છે."""
+    print(f"⬇️ Downloading video from: {url}")
+    output_file = "temp_video.mp4"
+    
+    try:
+        # જો Google Drive લિંક હોય તો gdown વાપરો
+        if "drive.google.com" in url:
+            # fuzzy=True એટલે પરમિશનના ઈશ્યુ હોય તો પણ પ્રયત્ન કરશે
+            gdown.download(url, output_file, quiet=False, fuzzy=True)
+        else:
+            # સાદી લિંક હોય તો requests વાપરો
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            with open(output_file, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        
+        # ફાઈલ ચેક કરો
+        if os.path.exists(output_file) and os.path.getsize(output_file) > 1000:
+            print(f"✅ Download Successful! Size: {os.path.getsize(output_file)} bytes")
+            return output_file
+        else:
+            print("❌ Download Failed: File is empty or too small.")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Download Error: {e}")
+        return None
+
 # ==============================================================================
-# 2. POSTING FUNCTIONS
+# 3. POSTING FUNCTIONS
 # ==============================================================================
 
 def instagram_post(row, row_num):
@@ -74,10 +109,24 @@ def instagram_post(row, row_num):
     video_url = row.get('Video_URL')
     caption = row.get('Caption', '')
     
+    # ઈન્સ્ટાગ્રામ માટે આપણને પબ્લિક URL જોઈએ, પણ જો ડ્રાઈવ લિંક હોય તો તે ડાયરેક્ટ ચાલતી નથી.
+    # ગ્રાફ API માટે વિડિયો પબ્લિક હોવો જરૂરી છે. 
+    # અહીં આપણે ડાઉનલોડ કરીને અપલોડ કરવાની કોશિશ કરીએ છીએ (Container Upload logic slightly different for local file)
+    # અત્યારે આપણે ડાયરેક્ટ URL જ વાપરીશું, પણ જો તે ડ્રાઈવની હોય તો ફેલ થશે.
+    # ઇન્સ્ટાગ્રામ માટે તમારે 'Direct Download Link' વાપરવી પડે અથવા વિડિયો કોઈ પબ્લિક સર્વર પર હોવો જોઈએ.
+    # ગૂગલ ડ્રાઈવની લિંક ઇન્સ્ટાગ્રામ API સીધી સ્વીકારતું નથી.
+    
+    # જો કે, YouTube માટે આપણે ફાઈલ ડાઉનલોડ કરીને મોકલી શકીએ છીએ.
+    # ઇન્સ્ટાગ્રામ માટે આપણે ડ્રાઈવ લિંકને 'Direct Link' માં ફેરવવી પડે.
+    
     print(f"📸 Posting to Instagram: {account_name}...")
 
+    # ડ્રાઈવ લિંક ફિક્સ (Hack for Drive Links on Insta API)
+    if "drive.google.com" in video_url and "/view" in video_url:
+        video_url = video_url.replace("/view", "/preview").replace("file/d/", "uc?export=download&id=")
+        # આ એક પ્રયાસ છે, પણ ડ્રાઈવ લિંક ઇન્સ્ટા પર અઘરી છે.
+
     try:
-        # 1. Container Create
         url = f"https://graph.facebook.com/v19.0/{page_id}/media"
         params = {
             'access_token': FB_ACCESS_TOKEN,
@@ -92,14 +141,11 @@ def instagram_post(row, row_num):
             print(f"❌ IG Init Failed: {response}")
             return None
 
-        # --- મહત્વનો સુધારો: 60 સેકન્ડ રાહ જુઓ ---
-        print(f"   - Container Created: {creation_id}. Waiting 60s for processing...")
+        print(f"   - Container Created: {creation_id}. Waiting 60s...")
         time.sleep(60) 
         
-        # 2. Publish
         pub_url = f"https://graph.facebook.com/v19.0/{page_id}/media_publish"
         pub_params = {'creation_id': creation_id, 'access_token': FB_ACCESS_TOKEN}
-        
         pub_res = requests.post(pub_url, params=pub_params).json()
         
         if pub_res.get('id'):
@@ -118,19 +164,13 @@ def youtube_post(row, row_num):
     if not youtube: return None
 
     video_url = row.get('Video_URL')
-    print(f"🎥 Downloading video for YouTube from {video_url}...")
     
-    try:
-        video_response = requests.get(video_url)
-        video_response.raise_for_status()
-    except Exception as e:
-        print(f"❌ Download Failed: {e}")
-        return None
+    # --- ફિક્સ: સાચો વિડિયો ડાઉનલોડ કરો ---
+    local_file = download_video(video_url)
+    if not local_file: return None
 
     base_title = row.get('Base_Title', 'New Video')
-    # Title Variation logic removed for simplicity/accuracy or can be kept simple
     final_title = f"{base_title} | {row.get('Account_Name')}"[:100]
-
     description = row.get('Caption', '')
     tags = str(row.get('Tags', 'shorts,viral')).split(',')
 
@@ -144,7 +184,7 @@ def youtube_post(row, row_num):
         'status': {'privacyStatus': 'public'}
     }
 
-    media = MediaIoBaseUpload(BytesIO(video_response.content), 'video/*', chunksize=-1, resumable=True)
+    media = MediaIoBaseUpload(local_file, 'video/*', chunksize=-1, resumable=True)
     
     try:
         req = youtube.videos().insert(part=','.join(body.keys()), body=body, media_body=media)
@@ -156,11 +196,16 @@ def youtube_post(row, row_num):
         
         video_id = resp.get('id')
         print(f"✅ YouTube Upload Success! ID: {video_id}")
-        # --- મહત્વનો સુધારો: લિંક રિટર્ન કરો ---
+        
+        # ક્લીનઅપ
+        if os.path.exists(local_file):
+            os.remove(local_file)
+            
         return f"https://youtu.be/{video_id}" 
         
     except Exception as e:
         print(f"❌ YouTube Upload Error: {e}")
+        if os.path.exists(local_file): os.remove(local_file)
         return None
 
 # ==============================================================================
@@ -173,22 +218,15 @@ def run_master_automation():
 
     try:
         data = sheet.get_all_records()
-        if not data:
-            print("No data found in sheet.")
-            return
-            
-        headers = list(data[0].keys())
-        
-        # Helper to find column index (1-based)
+        headers = list(data[0].keys()) if data else []
         sheet_headers = sheet.row_values(1)
         
         def get_col_idx(name):
-            try:
-                return next(i for i, v in enumerate(sheet_headers) if v.lower() == name.lower()) + 1
+            try: return next(i for i, v in enumerate(sheet_headers) if v.lower() == name.lower()) + 1
             except: return None
 
         status_col_idx = get_col_idx('Status')
-        link_col_idx = get_col_idx('Link') # લિંક સેવ કરવા માટેનું કોલમ
+        link_col_idx = get_col_idx('Link')
 
         if not status_col_idx:
             print("❌ Error: 'Status' column not found.")
@@ -203,13 +241,11 @@ def run_master_automation():
     for i, row in enumerate(data):
         row_num = i + 2
         
-        # Flexible key finding for Status
         status_key = next((h for h in headers if h.lower() == 'status'), None)
         current_status = str(row.get(status_key, '')).strip().upper()
         
         if current_status == 'PENDING' or current_status == 'FAIL':
             
-            # Flexible key finding for Platform
             platform_key = next((h for h in headers if h.lower() == 'platform'), None)
             platform = str(row.get(platform_key, '')).strip().lower()
             
@@ -225,13 +261,9 @@ def run_master_automation():
                 result_link = youtube_post(row, row_num)
             
             if result_link:
-                # Update Status to DONE
                 sheet.update_cell(row_num, status_col_idx, 'DONE')
-                
-                # Update Link if we have a valid URL and column exists
                 if link_col_idx and "http" in str(result_link):
                     sheet.update_cell(row_num, link_col_idx, result_link)
-                    
                 print(f"✅ Row {row_num} DONE. Link: {result_link}")
             else:
                 sheet.update_cell(row_num, status_col_idx, 'FAIL')
