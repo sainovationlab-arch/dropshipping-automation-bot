@@ -11,7 +11,7 @@ from google.oauth2.service_account import Credentials as ServiceAccountCredentia
 from google.oauth2.credentials import Credentials as UserCredentials
 
 # ==============================================================================
-# 1. ROBUST CONFIGURATION (Memory Only - No Files)
+# 1. CONFIGURATION
 # ==============================================================================
 
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
@@ -19,7 +19,6 @@ GCP_CREDENTIALS_JSON = os.environ.get("GCP_CREDENTIALS")
 YOUTUBE_TOKEN_JSON = os.environ.get("YOUTUBE_TOKEN_JSON")
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 👇 તમારા સાચા Page IDs (જે જૂના કોડમાં હતા તે મેં અહીં સાચવી લીધા છે)
 INSTAGRAM_IDS = {
     "Emerald Edge": "17841478369307404",
     "Urban Glint": "17841479492205083",
@@ -33,13 +32,11 @@ INSTAGRAM_IDS = {
 }
 
 def get_sheet_service():
-    """Securely connect to Google Sheet without creating a file."""
     try:
         if not GCP_CREDENTIALS_JSON:
             print("❌ FATAL: GCP_CREDENTIALS secret is missing!")
             return None
         creds_dict = json.loads(GCP_CREDENTIALS_JSON)
-        # Service Account for Sheets
         creds = ServiceAccountCredentials.from_service_account_info(
             creds_dict,
             scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
@@ -51,13 +48,11 @@ def get_sheet_service():
         return None
 
 def get_youtube_service():
-    """Securely connect to YouTube using the Token JSON string."""
     try:
         if not YOUTUBE_TOKEN_JSON:
             print("❌ YouTube Token Missing in Secrets!")
             return None
         token_dict = json.loads(YOUTUBE_TOKEN_JSON)
-        # User Credentials for YouTube Upload
         creds = UserCredentials.from_authorized_user_info(token_dict)
         return build('youtube', 'v3', credentials=creds)
     except Exception as e:
@@ -65,7 +60,7 @@ def get_youtube_service():
         return None
 
 # ==============================================================================
-# 2. POSTING FUNCTIONS (Your Successful Logic)
+# 2. POSTING FUNCTIONS
 # ==============================================================================
 
 def instagram_post(row, row_num):
@@ -82,7 +77,7 @@ def instagram_post(row, row_num):
     print(f"📸 Posting to Instagram: {account_name}...")
 
     try:
-        # 1. Container Create (This is your proven logic)
+        # 1. Container Create
         url = f"https://graph.facebook.com/v19.0/{page_id}/media"
         params = {
             'access_token': FB_ACCESS_TOKEN,
@@ -97,10 +92,10 @@ def instagram_post(row, row_num):
             print(f"❌ IG Init Failed: {response}")
             return False
 
-        print(f"   - Container Created: {creation_id}. Waiting for processing...")
+        print(f"   - Container Created: {creation_id}. Waiting 60s for processing...")
         
-        # 2. Wait & Publish
-        time.sleep(15) # Wait for video to process
+        # 2. Wait & Publish (Increased to 60s)
+        time.sleep(60) 
         
         pub_url = f"https://graph.facebook.com/v19.0/{page_id}/media_publish"
         pub_params = {'creation_id': creation_id, 'access_token': FB_ACCESS_TOKEN}
@@ -126,14 +121,12 @@ def youtube_post(row, row_num):
     print(f"🎥 Downloading video for YouTube from {video_url}...")
     
     try:
-        # Download logic
         video_response = requests.get(video_url)
         video_response.raise_for_status()
     except Exception as e:
         print(f"❌ Download Failed: {e}")
         return False
 
-    # Title Variation Logic
     base_title = row.get('Base_Title', 'New Video')
     keywords = ["Best", "Top", "Amazing", "Awesome", "New", "Latest"]
     title_parts = base_title.split()
@@ -142,7 +135,6 @@ def youtube_post(row, row_num):
     final_title = f"{' '.join(title_parts)} | {row.get('Account_Name')}"[:100]
 
     description = row.get('Caption', '')
-    # Check if 'Tags' column exists, otherwise use default
     tags = str(row.get('Tags', 'shorts,viral')).split(',')
 
     body = {
@@ -180,24 +172,18 @@ def run_master_automation():
     if not sheet: return
 
     try:
-        # Headers Validation
         data = sheet.get_all_records()
         if not data:
             print("No data found in sheet.")
             return
             
-        # Get actual headers from the first row of data keys
         headers = list(data[0].keys())
-        
-        # Helper to find column name regardless of case (Status vs status)
         status_key = next((h for h in headers if h.lower() == 'status'), None)
         
         if not status_key:
             print("❌ Error: 'Status' column not found.")
             return
 
-        # Column index for update (1-based)
-        # We need to find the index in the actual sheet headers row
         sheet_headers = sheet.row_values(1)
         try:
             status_col_idx = next(i for i, v in enumerate(sheet_headers) if v.lower() == 'status') + 1
@@ -215,9 +201,9 @@ def run_master_automation():
         row_num = i + 2
         current_status = str(row.get(status_key, '')).strip().upper()
         
+        # PENDING કે FAIL હોય તો ફરી ટ્રાય કરો
         if current_status == 'PENDING' or current_status == 'FAIL':
             
-            # Platform check logic
             platform = ""
             for key in row.keys():
                 if key.lower() == 'platform':
@@ -225,7 +211,6 @@ def run_master_automation():
                     break
             
             if not platform: continue
-
             if current_status == 'DONE': continue
 
             print(f"Processing Row {row_num}: {platform}")
