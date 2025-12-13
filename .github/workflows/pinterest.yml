@@ -21,29 +21,43 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install requests requests-toolbelt
+          # gspread અને oauth2client ઉમેર્યા
+          pip install requests requests-toolbelt gspread oauth2client
 
       - name: Run Pinterest Bot
         env:
-          # અહીં આપણે બધા 14 સિક્રેટ્સ કનેક્ટ કરીએ છીએ
+          # --- GOOGLE SHEETS SECRETS ---
+          GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+          SHEET_DROPSHIPPING_URL: ${{ secrets.SHEET_DROPSHIPPING_URL }}
+          SHEET_CONTENT_URL: ${{ secrets.SHEET_CONTENT_URL }}
+          
+          # --- ACCOUNT TOKENS AND BOARD IDs ---
+          
+          # 1. Luxivibe
           PINTEREST_TOKEN_LUXIVIBE: ${{ secrets.PINTEREST_TOKEN_LUXIVIBE }}
           PINTEREST_BOARD_LUXIVIBE: ${{ secrets.PINTEREST_BOARD_LUXIVIBE }}
           
+          # 2. Urban Glint
           PINTEREST_TOKEN_URBAN: ${{ secrets.PINTEREST_TOKEN_URBAN }}
           PINTEREST_BOARD_URBAN: ${{ secrets.PINTEREST_BOARD_URBAN }}
           
+          # 3. Royal Nexus
           PINTEREST_TOKEN_ROYAL: ${{ secrets.PINTEREST_TOKEN_ROYAL }}
           PINTEREST_BOARD_ROYAL: ${{ secrets.PINTEREST_BOARD_ROYAL }}
           
+          # 4. Opus Elite
           PINTEREST_TOKEN_OPUS: ${{ secrets.PINTEREST_TOKEN_OPUS }}
           PINTEREST_BOARD_OPUS: ${{ secrets.PINTEREST_BOARD_OPUS }}
           
+          # 5. Grand Orbit
           PINTEREST_TOKEN_GRAND: ${{ secrets.PINTEREST_TOKEN_GRAND }}
           PINTEREST_BOARD_GRAND: ${{ secrets.PINTEREST_BOARD_GRAND }}
           
+          # 6. Pearl Verse
           PINTEREST_TOKEN_PEARL: ${{ secrets.PINTEREST_TOKEN_PEARL }}
           PINTEREST_BOARD_PEARL: ${{ secrets.PINTEREST_BOARD_PEARL }}
           
+          # 7. Diamond Dice
           PINTEREST_TOKEN_DIAMOND: ${{ secrets.PINTEREST_TOKEN_DIAMOND }}
           PINTEREST_BOARD_DIAMOND: ${{ secrets.PINTEREST_BOARD_DIAMOND }}
           
