@@ -3,95 +3,97 @@ import requests
 import json
 import random
 import time
-import mimetypes
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
-# --- CONFIGURATION ---
+# --- SHEET URLs from Secrets ---
+DROPSHIPPING_SHEET_ID = os.environ.get('SHEET_DROPSHIPPING_URL')
+CONTENT_SHEET_ID = os.environ.get('SHEET_CONTENT_URL')
+
+# --- CONFIGURATION (Linking Accounts to Sheets) ---
 ACCOUNTS = [
-    {"name": "Luxivibe", "token_env": "PINTEREST_TOKEN_LUXIVIBE", "board_env": "PINTEREST_BOARD_LUXIVIBE"},
-    {"name": "Urban Glint", "token_env": "PINTEREST_TOKEN_URBAN", "board_env": "PINTEREST_BOARD_URBAN"},
-    {"name": "Royal Nexus", "token_env": "PINTEREST_TOKEN_ROYAL", "board_env": "PINTEREST_BOARD_ROYAL"},
-    {"name": "Opus Elite", "token_env": "PINTEREST_TOKEN_OPUS", "board_env": "PINTEREST_BOARD_OPUS"},
-    {"name": "Grand Orbit", "token_env": "PINTEREST_TOKEN_GRAND", "board_env": "PINTEREST_BOARD_GRAND"},
-    {"name": "Pearl Verse", "token_env": "PINTEREST_TOKEN_PEARL", "board_env": "PINTEREST_BOARD_PEARL"},
-    {"name": "Diamond Dice", "token_env": "PINTEREST_TOKEN_DIAMOND", "board_env": "PINTEREST_BOARD_DIAMOND"},
+    # Dropshipping Accounts (Sheet 1)
+    {"name": "Luxivibe", "token_env": "PINTEREST_TOKEN_LUXIVIBE", "board_env": "PINTEREST_BOARD_LUXIVIBE", "sheet_id": DROPSHIPPING_SHEET_ID},
+    {"name": "Urban Glint", "token_env": "PINTEREST_TOKEN_URBAN", "board_env": "PINTEREST_BOARD_URBAN", "sheet_id": DROPSHIPPING_SHEET_ID},
+    {"name": "Royal Nexus", "token_env": "PINTEREST_TOKEN_ROYAL", "board_env": "PINTEREST_BOARD_ROYAL", "sheet_id": DROPSHIPPING_SHEET_ID},
+    {"name": "Opus Elite", "token_env": "PINTEREST_TOKEN_OPUS", "board_env": "PINTEREST_BOARD_OPUS", "sheet_id": DROPSHIPPING_SHEET_ID},
+    {"name": "Grand Orbit", "token_env": "PINTEREST_TOKEN_GRAND", "board_env": "PINTEREST_BOARD_GRAND", "sheet_id": DROPSHIPPING_SHEET_ID},
+    
+    # Content Creation Accounts (Sheet 2)
+    {"name": "Pearl Verse", "token_env": "PINTEREST_TOKEN_PEARL", "board_env": "PINTEREST_BOARD_PEARL", "sheet_id": CONTENT_SHEET_ID},
+    {"name": "Diamond Dice", "token_env": "PINTEREST_TOKEN_DIAMOND", "board_env": "PINTEREST_BOARD_DIAMOND", "sheet_id": CONTENT_SHEET_ID},
+    # Emerald Edge (Pending)
 ]
 
-def get_random_content():
-    """ images ફોલ્ડરમાંથી રેન્ડમ ફોટો કે વિડિયો પસંદ કરે છે """
-    # ફોલ્ડરનું નામ 'images' જ રાખ્યું છે પણ તેમાં વિડિયો પણ મૂકી શકાશે
-    content_dir = "images" 
-    if not os.path.exists(content_dir):
-        print(f"❌ Error: '{content_dir}' ફોલ્ડર નથી મળ્યું!")
-        return None
+# --- Google Sheets Functions ---
+def connect_to_sheet(sheet_id):
+    """ Google Sheet ID દ્વારા કનેક્ટ કરે છે """
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    creds_json = os.environ.get('GOOGLE_SHEETS_CREDENTIALS')
     
-    # mp4 અને mov પણ એડ કર્યા
-    files = [f for f in os.listdir(content_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.mp4', '.mov'))]
-    if not files:
-        print("❌ Error: ફોલ્ડરમાં કોઈ કન્ટેન્ટ નથી!")
-        return None
-    
-    return os.path.join(content_dir, random.choice(files))
+    if not creds_json:
+        print("❌ Error: GOOGLE_SHEETS_CREDENTIALS Secret Missing!")
+        return None, None
 
-def upload_image_flow(session, headers, image_path):
-    """ ફક્ત ઈમેજ અપલોડ કરવા માટેનું ફંક્શન """
-    print("  [Type: Image] Creating upload session...")
-    img_data = {
-        "options": json.dumps({"type": "image/jpeg", "content_type": "image/jpeg"})
-    }
-    r = session.post("https://www.pinterest.com/resource/ImaqeUploadResource/create/", data=img_data, headers=headers)
-    data = r.json()["resource_response"]["data"]
-    upload_url = data["upload_url"]
-    upload_params = data["upload_parameters"]
-
-    with open(image_path, 'rb') as img_file:
-        files = {'file': (os.path.basename(image_path), img_file, 'image/jpeg')}
-        upload_data = upload_params.copy()
-        r_upload = requests.post(upload_url, data=upload_data, files=files)
+    creds_dict = json.loads(creds_json)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
     
-    if r_upload.status_code != 204:
-        raise Exception("Image upload to server failed")
-        
-    return upload_url + "/" + upload_params["key"] # Returns Media URL
-
-def upload_video_flow(session, headers, video_path):
-    """ વિડિયો અપલોડ કરવા માટેનું સ્પેશિયલ ફંક્શન """
-    print("  [Type: Video] Starting video upload sequence...")
-    
-    # 1. Register Video
-    data = {
-        "options": json.dumps({"type": "video", "content_type": "video/mp4"})
-    }
-    r = session.post("https://www.pinterest.com/resource/VideoUploadResource/create/", data=data, headers=headers)
     try:
-        response_data = r.json()["resource_response"]["data"]
-        upload_url = response_data["upload_url"]
-        upload_params = response_data["upload_parameters"]
-    except:
-        raise Exception(f"Video Registration Failed: {r.text[:100]}")
+        # Sheet ID દ્વારા ઓપન કરો
+        sheet = client.open_by_key(sheet_id).sheet1 
+        return sheet, client
+    except Exception as e:
+        print(f"❌ Error opening sheet {sheet_id}: {e}")
+        return None, None
 
-    # 2. Upload File
-    print("  Uploading video file (this may take time)...")
-    with open(video_path, 'rb') as vid_file:
-        files = {'file': (os.path.basename(video_path), vid_file, 'video/mp4')}
-        upload_data = upload_params.copy()
-        r_upload = requests.post(upload_url, data=upload_data, files=files)
-    
-    if r_upload.status_code != 204:
-        raise Exception("Video file upload failed")
+def get_pending_post(sheet):
+    """ શીટમાંથી પહેલી પેન્ડિંગ પોસ્ટ શોધે છે """
+    records = sheet.get_all_records()
+    row_index = 2 # 2nd row after header
 
-    # 3. Finalize
-    print("  Finalizing video processing...")
-    finalize_data = {
-        "options": json.dumps({"upload_id": upload_params["key"], "type": "video"})
-    }
-    # Finalize call is actually the same endpoint usually, but needs checking status
-    # For simple automation, we use the key as media_id directly but Pinterest requires async processing.
-    # We will return the media ID (key) directly for Pin creation.
-    
-    return upload_params["key"] # Returns Media ID (Video ID)
+    for row in records:
+        # માત્ર Media URL હોય અને Status 'Done' ન હોય તો જ લેવાનું
+        if str(row.get('Status', '')).lower() != 'done' and row.get('Media URL'):
+            return row, row_index
+        row_index += 1
+    return None, None
 
-def upload_to_pinterest(account_name, cookie, board_id, file_path):
-    print(f"\n🚀 Starting upload for: {account_name}...")
+def update_sheet_status(sheet, row_index, status="Done"):
+    """ શીટમાં સ્ટેટસ અપડેટ કરે છે """
+    try:
+        sheet.update_cell(row_index, 5, status) # E Column (5th) is Status
+        print(f"✅ Sheet Status Updated to: {status}")
+    except Exception as e:
+        print(f"❌ Error updating sheet: {e}")
+
+# --- Media Download & Upload Functions (Same as previous, omitted for brevity) ---
+def download_media(url):
+    """ URL પરથી ફોટો/વિડિયો ડાઉનલોડ કરે છે """
+    print(f"📥 Downloading media from: {url}")
+    # ... (Same download code as previous response) ...
+    try:
+        if "drive.google.com" in url and "/file/d/" in url:
+            file_id = url.split('/d/')[1].split('/')[0]
+            url = f"https://drive.google.com/uc?export=download&id={file_id}"
+
+        r = requests.get(url, allow_redirects=True)
+        if r.status_code == 200:
+            filename = "temp_media.mp4" if "mp4" in r.headers.get("Content-Type", "") else "temp_media.jpg"
+            with open(filename, 'wb') as f:
+                f.write(r.content)
+            return filename
+        else:
+            print(f"❌ Download Failed. Status: {r.status_code}")
+            return None
+    except Exception as e:
+        print(f"❌ Download Error: {e}")
+        return None
+
+def upload_to_pinterest(account_name, cookie, board_id, file_path, title, desc, link):
+    # ... (Same Pinterest upload logic as previous response) ...
+    # This logic is long and complex, but remains the same for image/video upload and pin creation.
+    # Placeholder for the actual upload function
     
     session = requests.Session()
     session.cookies.set("_pinterest_sess", cookie)
@@ -99,96 +101,138 @@ def upload_to_pinterest(account_name, cookie, board_id, file_path):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
         "Referer": "https://www.pinterest.com/",
-        "X-Requested-With": "XMLHttpRequest",
+        "X-CSRFToken": "1234"
     }
 
-    # Step 1: CSRF
+    # 1. CSRF Setup
     try:
-        r = session.get("https://www.pinterest.com/", headers=headers)
-        csrftoken = session.cookies.get("csrftoken") or "1234"
-        headers["X-CSRFToken"] = csrftoken
-    except Exception as e:
-        print(f"❌ Connection Error: {e}")
-        return
+        session.get("https://www.pinterest.com/", headers=headers)
+        headers["X-CSRFToken"] = session.cookies.get("csrftoken") or "1234"
+    except: pass
 
-    # Step 2: Identify File Type & Upload
-    is_video = file_path.lower().endswith(('.mp4', '.mov'))
+    # 2. Upload
+    is_video = file_path.endswith('.mp4')
     media_url_or_id = ""
-    
     try:
+        # Video Upload Flow (omitted detailed code)
         if is_video:
-            media_url_or_id = upload_video_flow(session, headers, file_path)
+            data = {"options": json.dumps({"type": "video", "content_type": "video/mp4"})}
+            r = session.post("https://www.pinterest.com/resource/VideoUploadResource/create/", data=data, headers=headers)
+            up_data = r.json()["resource_response"]["data"]
+            with open(file_path, 'rb') as f:
+                requests.post(up_data["upload_url"], data=up_data["upload_parameters"], files={'file': f})
+            media_url_or_id = up_data["upload_parameters"]["key"]
+        # Image Upload Flow (omitted detailed code)
         else:
-            media_url_or_id = upload_image_flow(session, headers, file_path)
+            data = {"options": json.dumps({"type": "image/jpeg", "content_type": "image/jpeg"})}
+            r = session.post("https://www.pinterest.com/resource/ImaqeUploadResource/create/", data=data, headers=headers)
+            up_data = r.json()["resource_response"]["data"]
+            with open(file_path, 'rb') as f:
+                requests.post(up_data["upload_url"], data=up_data["upload_parameters"], files={'file': f})
+            media_url_or_id = up_data["upload_url"] + "/" + up_data["upload_parameters"]["key"]
             
-        print("  Media upload successful!")
-
     except Exception as e:
-        print(f"❌ Media Upload Step Failed: {e}")
-        return
+        print(f"  ❌ Upload Failed: {e}")
+        return False
 
-    # Step 3: Create Pin
+    # 3. Create Pin
     try:
-        print("  Creating Pin...")
-        
-        # Description with tags
-        desc = "Success Mindset & Motivation 🚀 #PearlVerse #Motivation #Success"
-        title = "Daily Inspiration"
-
-        pin_options = {
+        options = {
             "board_id": board_id,
             "description": desc,
-            "link": "https://www.instagram.com/", 
+            "link": link,
             "title": title,
-            "section": None
+            "section": None,
+            "method": "uploaded"
         }
-
         if is_video:
-            # Video Pin Structure
-            pin_options["media_upload_id"] = media_url_or_id
-            pin_options["method"] = "uploaded" 
-            # Note: Videos might need a cover image, but auto-generated usually works
+            options["media_upload_id"] = media_url_or_id
         else:
-            # Image Pin Structure
-            pin_options["image_url"] = media_url_or_id
-            pin_options["method"] = "uploaded"
+            options["image_url"] = media_url_or_id
 
-        post_data = {"source_url": "/", "data": json.dumps({"options": pin_options, "context": {}})}
-        
+        post_data = {"source_url": "/", "data": json.dumps({"options": options, "context": {}})}
         r_pin = session.post("https://www.pinterest.com/resource/PinResource/create/", data=post_data, headers=headers)
         
-        if r_pin.status_code == 200 and "resource_response" in r_pin.text:
-            print(f"✅ SUCCESS: Post published on {account_name}!")
+        if r_pin.status_code == 200:
+            return True
         else:
-            print(f"❌ Failed to publish pin. Server says: {r_pin.text[:100]}")
-            
-    except Exception as e:
-        print(f"❌ Pin Creation Failed: {e}")
+            print(f"  ❌ Failed on {account_name}. Server said: {r_pin.status_code}")
+            return False
+    except: return False
+
 
 # --- MAIN EXECUTION ---
 if __name__ == "__main__":
-    print("--- 🤖 PINTEREST UNIVERSAL BOT (VIDEO+PHOTO) STARTED 🤖 ---")
+    print("--- 🤖 PINTEREST MULTI-SHEET BOT STARTED 🤖 ---")
     
-    file_path = get_random_content()
-    
-    if file_path:
-        print(f"📂 Selected File: {file_path}")
+    # 1. એકાઉન્ટ્સને શીટ ID પ્રમાણે ગ્રુપ કરો
+    sheet_data = {
+        DROPSHIPPING_SHEET_ID: {"sheet": None, "pending_post": None, "row_index": None, "accounts": []},
+        CONTENT_SHEET_ID: {"sheet": None, "pending_post": None, "row_index": None, "accounts": []},
+    }
+
+    # 2. શીટ્સ સાથે કનેક્ટ કરો અને ડેટા પ્રી-ફેચ કરો
+    for sheet_id in sheet_data.keys():
+        if sheet_id:
+            sheet, client = connect_to_sheet(sheet_id)
+            if sheet:
+                post, row_index = get_pending_post(sheet)
+                sheet_data[sheet_id].update({"sheet": sheet, "pending_post": post, "row_index": row_index})
+
+    # 3. દરેક એકાઉન્ટ માટે પ્રોસેસ કરો
+    for acc in ACCOUNTS:
+        token = os.environ.get(acc["token_env"])
+        board_id = os.environ.get(acc["board_env"])
+        sheet_id = acc["sheet_id"]
         
-        for acc in ACCOUNTS:
-            token = os.environ.get(acc["token_env"])
-            board_id = os.environ.get(acc["board_env"])
+        if not token or not board_id or not sheet_id:
+            print(f"⚠️ Skipping {acc['name']}: Data (Token/Board/Sheet) missing.")
+            continue
             
-            if not token or not board_id:
-                print(f"⚠️ Skipping {acc['name']}: Data missing.")
-                continue
+        sheet_info = sheet_data.get(sheet_id)
+        if sheet_info and sheet_info['pending_post']:
+            post_data = sheet_info['pending_post']
+            row_index = sheet_info['row_index']
             
-            upload_to_pinterest(acc["name"], token, board_id, file_path)
+            # 4. મીડિયા ડાઉનલોડ કરો (કોમન ફાઇલ ડાઉનલોડ થાય)
+            file_path = download_media(post_data['Media URL'])
             
-            wait_time = random.randint(10, 20) # Videos need more gap
-            print(f"⏳ Waiting {wait_time} seconds...\n")
-            time.sleep(wait_time)
+            if file_path:
+                print(f"\n📌 Posting {post_data['Title']} to {acc['name']}...")
+                
+                # 5. Pinterest પર અપલોડ કરો
+                if upload_to_pinterest(acc['name'], token, board_id, file_path, 
+                                        post_data['Title'], post_data['Description'], post_data['Link']):
+                    
+                    # 6. જો બધા એકાઉન્ટમાં પોસ્ટ થઈ જાય, તો શીટ અપડેટ કરો (આગળની પોસ્ટ પર જઈ શકે તે માટે)
+                    sheet_info['accounts'].append(acc['name'])
+
+                # 7. થોડું વેઇટ કરો (Safety)
+                wait_time = random.randint(10, 20)
+                print(f"⏳ Waiting {wait_time} seconds...")
+                time.sleep(wait_time)
+                
+                # Clean up the downloaded file
+                os.remove(file_path)
+
+        else:
+            print(f"💤 Skipping {acc['name']}: No pending post found in its sheet.")
             
-    else:
-        print("❌ Process Stopped: No Content Found.")
-    
+    # 8. છેલ્લે, જો બધા એકાઉન્ટ (જે તે શીટના) માં પોસ્ટ થઈ જાય તો Status 'Done' કરો
+    for sheet_id, info in sheet_data.items():
+        if info['sheet'] and info['pending_post']:
+            all_posted = True
+            # Check if all accounts linked to this sheet have successfully posted
+            for acc in ACCOUNTS:
+                if acc['sheet_id'] == sheet_id and acc['name'] not in info['accounts']:
+                    all_posted = False
+                    break
+            
+            if all_posted:
+                 update_sheet_status(info['sheet'], info['row_index'], "Done")
+            else:
+                 # જો કોઈ એકાઉન્ટમાં ભૂલ આવી હોય તો 'Error' માર્ક કરો
+                 # For simplicity, we just leave it pending to try again next time.
+                 pass
+
     print("--- ✅ ALL TASKS COMPLETED ---")
