@@ -1,0 +1,50 @@
+name: Pinterest Multi-Account Auto Poster
+
+on:
+  schedule:
+    # દર 6 કલાકે રન થશે (દિવસની 4 પોસ્ટ)
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # મેન્યુઅલી રન કરવા માટે
+
+jobs:
+  run_bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          pip install requests requests-toolbelt
+
+      - name: Run Pinterest Bot
+        env:
+          # અહીં આપણે બધા 14 સિક્રેટ્સ કનેક્ટ કરીએ છીએ
+          PINTEREST_TOKEN_LUXIVIBE: ${{ secrets.PINTEREST_TOKEN_LUXIVIBE }}
+          PINTEREST_BOARD_LUXIVIBE: ${{ secrets.PINTEREST_BOARD_LUXIVIBE }}
+          
+          PINTEREST_TOKEN_URBAN: ${{ secrets.PINTEREST_TOKEN_URBAN }}
+          PINTEREST_BOARD_URBAN: ${{ secrets.PINTEREST_BOARD_URBAN }}
+          
+          PINTEREST_TOKEN_ROYAL: ${{ secrets.PINTEREST_TOKEN_ROYAL }}
+          PINTEREST_BOARD_ROYAL: ${{ secrets.PINTEREST_BOARD_ROYAL }}
+          
+          PINTEREST_TOKEN_OPUS: ${{ secrets.PINTEREST_TOKEN_OPUS }}
+          PINTEREST_BOARD_OPUS: ${{ secrets.PINTEREST_BOARD_OPUS }}
+          
+          PINTEREST_TOKEN_GRAND: ${{ secrets.PINTEREST_TOKEN_GRAND }}
+          PINTEREST_BOARD_GRAND: ${{ secrets.PINTEREST_BOARD_GRAND }}
+          
+          PINTEREST_TOKEN_PEARL: ${{ secrets.PINTEREST_TOKEN_PEARL }}
+          PINTEREST_BOARD_PEARL: ${{ secrets.PINTEREST_BOARD_PEARL }}
+          
+          PINTEREST_TOKEN_DIAMOND: ${{ secrets.PINTEREST_TOKEN_DIAMOND }}
+          PINTEREST_BOARD_DIAMOND: ${{ secrets.PINTEREST_BOARD_DIAMOND }}
+          
+        run: python master_bot.py
