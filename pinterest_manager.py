@@ -2,6 +2,7 @@ import os
 import time
 import requests
 import gspread
+import json
 from google.oauth2.service_account import Credentials
 
 # --- CONFIGURATION ---
@@ -16,96 +17,80 @@ BRAND_TOKENS = {
     "Grand Orbit": {"token": "PINTEREST_TOKEN_GRAND", "board": "PINTEREST_BOARD_GRAND"},
     "Royal Nexus": {"token": "PINTEREST_TOKEN_ROYAL", "board": "PINTEREST_BOARD_ROYAL"},
     "Opus Elite": {"token": "PINTEREST_TOKEN_OPUS", "board": "PINTEREST_BOARD_OPUS"},
-    "Emerald Edge": {"token": "PINTEREST_TOKEN_EMERALD", "board": "PINTEREST_BOARD_EMERALD"} 
+    "Emerald Edge": {"token": "PINTEREST_TOKEN_EMERALD", "board": "PINTEREST_BOARD_EMERALD"}
 }
 
 def get_google_client():
     creds_json = os.environ.get('GCP_CREDENTIALS')
     if not creds_json:
         raise ValueError("GCP_CREDENTIALS not found!")
-    
-    import json
     creds_dict = json.loads(creds_json)
     creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     return gspread.authorize(creds)
 
-def post_to_pinterest(brand_name, image_url, title, description):
-    print(f"📌 Preparing pin for: {brand_name}")
+def download_file(url, filename):
+    """Google Drive Link mathi Video Download kare che"""
+    print(f"⬇️ Downloading video...")
     
-    brand_data = BRAND_TOKENS.get(brand_name)
-    if not brand_data:
-        print(f"⚠️ Brand '{brand_name}' configuration not found.")
-        return False
+    # Convert View Link to Download Link
+    if "drive.google.com" in url and "/view" in url:
+        file_id = url.split("/d/")[1].split("/")[0]
+        url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    
+    response = requests.get(url, stream=True)
+    if response.status_code == 200:
+        with open(filename, 'wb') as f:
+            for chunk in response.iter_content(1024):
+                f.write(chunk)
+        return True
+    return False
+
+def upload_video_to_pinterest(access_token, file_path):
+    """Pinterest Media API thi Video Upload kare che"""
+    print("📤 Uploading video to Pinterest Server...")
+    
+    # Step 1: Register Upload
+    register_url = "https://api.pinterest.com/v5/media"
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+    payload = {"media_type": "video"}
+    
+    reg_resp = requests.post(register_url, headers=headers, json=payload)
+    if reg_resp.status_code != 201:
+        print(f"❌ Media Register Failed: {reg_resp.text}")
+        return None
+    
+    data = reg_resp.json()
+    media_id = data['media_id']
+    upload_url = data['upload_url']
+    upload_params = data['upload_parameters']
+    
+    # Step 2: Actual File Upload
+    with open(file_path, 'rb') as file:
+        upload_data = upload_params.copy()
+        upload_data['file'] = file
+        # Note: requests.post handles multipart automatically if 'files' is passed
+        # But we need to pass params as fields and file as files
+        # Careful cleanup of params
+        files = {'file': file}
+        up_resp = requests.post(upload_url, data=upload_params, files=files)
         
-    access_token = os.environ.get(brand_data['token'])
-    board_id = os.environ.get(brand_data['board'])
-    
-    if not access_token or not board_id:
-        print(f"❌ Missing Secrets for {brand_name}")
-        return False
+    if up_resp.status_code != 204:
+        print("❌ Video File Upload Failed")
+        return None
 
-    url = "https://api.pinterest.com/v5/pins"
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "board_id": board_id,
-        "media_source": {
-            "source_type": "image_url",
-            "url": image_url
-        },
-        "title": title,
-        "description": description
-    }
-
-    try:
-        response = requests.post(url, headers=headers, json=payload)
-        if response.status_code == 201:
-            print(f"✅ PIN SUCCESS: {brand_name}")
-            return True
-        else:
-            print(f"❌ PIN FAILED: {response.text}")
-            return False
-    except Exception as e:
-        print(f"❌ ERROR: {e}")
-        return False
-
-def run_pinterest_automation():
-    print("🚀 Pinterest Automation Started (Sheet Fixed)...")
-    client = get_google_client()
-    
-    sheet_url = os.environ.get('SHEET_CONTENT_URL')
-    if not sheet_url:
-        print("❌ Sheet URL not found")
-        return
-
-    # Have aapne 'Pending_Uploads' tab j kholishu
-    try:
-        sheet = client.open_by_url(sheet_url).worksheet("Pending_Uploads")
-    except:
-        print("❌ Error: Tab name 'Pending_Uploads' not found. Please rename 'Sheet1' to 'Pending_Uploads'")
-        return
-
-    data = sheet.get_all_records()
-    
-    for i, row in enumerate(data, start=2):
-        # Tamari sheet mujab column names
-        status = row.get("Status", "")
-        platform = row.get("Platform", "")
-        
-        if status != "Done" and platform.lower() == "pinterest":
-            # Mapping columns from YOUR sheet
-            brand = row.get("Account_Name")  # 'Brand Name' badle 'Account_Name'
-            img = row.get("Video_URL")       # 'Image_URL' badle 'Video_URL'
-            title = row.get("Caption")       # 'Title' badle 'Caption'
+    # Step 3: Wait for Processing
+    print("⏳ Processing Video (Waiting 10s)...")
+    for _ in range(5):
+        time.sleep(5)
+        check_resp = requests.get(f"{register_url}/{media_id}", headers=headers)
+        status = check_resp.json().get('status')
+        if status == 'succeeded':
+            print("✅ Video Processed!")
+            return media_id
+        elif status == 'failed':
+            print("❌ Video Processing Failed on Pinterest")
+            return None
             
-            # Description ma Caption + Tags banne mix kariye
-            desc = f"{row.get('Caption')} \n\n {row.get('Tags')}"
-            
-            if post_to_pinterest(brand, img, title, desc):
-                sheet.update_cell(i, 8, "Done") # Column H (8) ma Done lakho
-                time.sleep(2)
+    return media_id
 
-if __name__ == "__main__":
-    run_pinterest_automation()
+def create_pin(access_token, board_id, media_id, title, description, cover_url=None):
