@@ -6,3 +6,6 @@ oauth2client
 requests
 gdown
 tenacity
+gspread
+google-auth
+requests
