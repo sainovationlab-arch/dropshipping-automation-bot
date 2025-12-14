@@ -54,6 +54,9 @@ def download_file(url, filename):
 
 def upload_video_to_pinterest(access_token, file_path):
     print("📤 Uploading video to Pinterest Server...")
+    # Clean token (Remove spaces/newlines)
+    access_token = access_token.strip()
+    
     register_url = "https://api.pinterest.com/v5/media"
     headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
     payload = {"media_type": "video"}
@@ -94,6 +97,9 @@ def upload_video_to_pinterest(access_token, file_path):
         return None
 
 def create_pin(access_token, board_id, media_id, title, description):
+    # Clean token (Remove spaces/newlines)
+    access_token = access_token.strip()
+    
     url = "https://api.pinterest.com/v5/pins"
     headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
     payload = {
@@ -134,7 +140,6 @@ def run_pinterest_automation():
         platform = str(row.get("Platform", "")).strip().lower()
         brand = row.get("Account_Name")
 
-        # DEBUG PRINT - Aa line tamne batavse ke bot su vanche che
         print(f"🔎 Row {i}: Brand='{brand}' | Platform='{platform}' | Status='{status}'")
 
         if status != "done" and "pinterest" in platform:
@@ -151,14 +156,15 @@ def run_pinterest_automation():
 
             video_filename = "temp_video.mp4"
             if download_file(video_url, video_filename):
-                token = os.environ.get(brand_config['token'])
-                board = os.environ.get(brand_config['board'])
+                # Retrieve tokens safely with stripping
+                token = os.environ.get(brand_config['token'], "").strip()
+                board = os.environ.get(brand_config['board'], "").strip()
                 
                 if token and board:
                     media_id = upload_video_to_pinterest(token, video_filename)
                     if media_id:
                         if create_pin(token, board, media_id, caption, desc):
-                            sheet.update_cell(i, 8, "Done")
+                            sheet.update_cell(i, 8, "Done") # Update status
                             print(f"✅ Row {i} Done!")
                 else:
                     print(f"❌ Missing Secrets for {brand}")
