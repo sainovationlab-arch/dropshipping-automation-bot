@@ -132,10 +132,13 @@ def run_pinterest_automation():
     for i, row in enumerate(data, start=2):
         status = str(row.get("Status", "")).strip().lower()
         platform = str(row.get("Platform", "")).strip().lower()
+        brand = row.get("Account_Name")
+
+        # DEBUG PRINT - Aa line tamne batavse ke bot su vanche che
+        print(f"🔎 Row {i}: Brand='{brand}' | Platform='{platform}' | Status='{status}'")
 
         if status != "done" and "pinterest" in platform:
-            print(f"🎯 Processing Row {i}")
-            brand = row.get("Account_Name")
+            print(f"🎯 MATCH FOUND: Processing Row {i}")
             video_url = row.get("Video_URL")
             caption = row.get("Caption")
             tags = row.get("Tags")
