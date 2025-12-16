@@ -1,355 +1,102 @@
-import gspread
-import requests
-import json
-import random
 import os
+import json
+import gspread
+from datetime import datetime, timedelta
+import pytz
 import time
-import gdown
-from tenacity import retry, stop_after_attempt, wait_fixed
-from googleapiclient.http import MediaFileUpload
-from googleapiclient.discovery import build
-from google.oauth2.service_account import Credentials as ServiceAccountCredentials
-from google.oauth2.credentials import Credentials as UserCredentials
 
-# ==============================================================================
-# 1. CONFIGURATION & SECRETS SETUP
-# ==============================================================================
+# ================= CONFIG =================
 
-# General Secrets
-SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
-GCP_CREDENTIALS_JSON = os.environ.get("GCP_CREDENTIALS")
-FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
+IST = pytz.timezone("Asia/Kolkata")
 
-# Pinterest Secrets
-PINTEREST_SESSION = os.environ.get("PINTEREST_SESSION")
-PINTEREST_BOARD_ID = os.environ.get("PINTEREST_BOARD_ID")
+SHEET_ID = os.environ.get("SHEET_CONTENT_URL")
+GCP_JSON = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 
-# Instagram IDs (Account Name -> ID)
-INSTAGRAM_IDS = {
-    "Emerald Edge": "17841478369307404",
-    "Urban Glint": "17841479492205083",
-    "Diamond Dice": "17841478369307404",
-    "Grand Orbit": "17841479516066757",
-    "Opus": "17841479493645419",
-    "Opus Elite": "17841479493645419",
-    "Pearl Verse": "17841478822408000",
-    "Royal Nexus": "17841479056452004",
-    "Luxivibe": "17841479492205083"
-}
+DATE_COL = 0   # Column A
+DAY_COL = 1    # Column B
+TIME_COL = 2   # Column C
+STATUS_COL = 9 # Column J
+LOG_COL = 15   # Column P
 
-# YouTube 8-Channel Mapping (Account Name -> Secret Token)
-YOUTUBE_PROJECT_MAP = {
-    "Pearl Verse": os.environ.get("YT_PEARL_VERSE"),
-    "Opus Elite": os.environ.get("YT_OPUS_ELITE"),
-    "Diamond Dice": os.environ.get("YT_DIAMOND_DICE"),
-    "Emerald Edge": os.environ.get("YT_EMERALD_EDGE"),
-    "Royal Nexus": os.environ.get("YT_ROYAL_NEXUS"),
-    "Grand Orbit": os.environ.get("YT_GRAND_ORBIT"),
-    "Urban Glint": os.environ.get("YT_URBAN_GLINT"),
-    "Luxivibe": os.environ.get("YT_LUXI_VIBE")
-}
+TIME_BUFFER_MIN = 3  # +/- minutes window
 
-# ==============================================================================
-# 2. HELPER FUNCTIONS (Download, Connect)
-# ==============================================================================
+# ================= AUTH =================
 
-def get_sheet_service():
+def connect_sheet():
+    creds_dict = json.loads(GCP_JSON)
+    gc = gspread.service_account_from_dict(creds_dict)
+    return gc.open_by_key(SHEET_ID).sheet1
+
+# ================= TIME HELPERS =================
+
+def parse_sheet_time(time_str):
     try:
-        if not GCP_CREDENTIALS_JSON:
-            print("❌ FATAL: GCP_CREDENTIALS secret is missing!")
-            return None
-        creds_dict = json.loads(GCP_CREDENTIALS_JSON)
-        creds = ServiceAccountCredentials.from_service_account_info(
-            creds_dict,
-            scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-        )
-        client = gspread.authorize(creds)
-        return client.open_by_key(SPREADSHEET_ID).sheet1
-    except Exception as e:
-        print(f"❌ Sheet Connection Error: {e}")
+        return datetime.strptime(time_str.strip(), "%I:%M %p").time()
+    except:
         return None
 
-def get_youtube_service(account_name):
-    """Selects the correct YouTube Token based on Account Name."""
-    try:
-        clean_name = str(account_name).strip()
-        token_json = YOUTUBE_PROJECT_MAP.get(clean_name)
-        
-        if not token_json:
-            print(f"❌ No YouTube Token found for '{clean_name}'. Check Secrets.")
-            return None
-            
-        token_dict = json.loads(token_json)
-        creds = UserCredentials.from_authorized_user_info(token_dict)
-        return build('youtube', 'v3', credentials=creds)
-    except Exception as e:
-        print(f"❌ YouTube Auth Error for {account_name}: {e}")
-        return None
+# ================= MAIN LOGIC =================
 
-def safe_update_cell(sheet, row, col, value):
-    try:
-        sheet.update_cell(row, col, value)
-    except Exception as e:
-        print(f"⚠️ Sheet Update Failed: {e}")
+def main():
+    print("🤖 BOT WOKE UP")
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
-def download_video(url):
-    print(f"⬇️ Downloading video from: {url}")
-    output_file = f"video_{random.randint(1000, 9999)}.mp4"
-    try:
-        if "drive.google.com" in url:
-            gdown.download(url, output_file, quiet=False, fuzzy=True)
-        else:
-            response = requests.get(url, stream=True)
-            with open(output_file, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192): f.write(chunk)
-        
-        if os.path.exists(output_file) and os.path.getsize(output_file) > 1000:
-            print(f"✅ Downloaded: {output_file} ({os.path.getsize(output_file)} bytes)")
-            return output_file
-        else:
-            print("❌ Download Failed: File is empty.")
-            return None
-    except Exception as e:
-        print(f"❌ Download Error: {e}")
-        if os.path.exists(output_file): os.remove(output_file)
-        raise e
+    now = datetime.now(IST)
+    today_date = now.date()
+    today_day = now.strftime("%A")
+    now_time = now.time()
 
-# ==============================================================================
-# 3. PLATFORM POSTING FUNCTIONS
-# ==============================================================================
+    print(f"🕒 Current IST Time: {now.strftime('%Y-%m-%d %I:%M %p')} ({today_day})")
 
-# --- INSTAGRAM ---
-def instagram_post(row, row_num):
-    account_name = str(row.get('Account_Name', '')).strip()
-    page_id = INSTAGRAM_IDS.get(account_name)
-    
-    if not page_id:
-        print(f"⚠️ No Instagram ID for {account_name}")
-        return None 
-        
-    video_url = row.get('Video_URL')
-    caption = row.get('Caption', '')
-    
-    print(f"📸 Posting to Instagram: {account_name}...")
-    local_file = download_video(video_url)
-    if not local_file: return None
+    sheet = connect_sheet()
+    rows = sheet.get_all_values()
 
-    try:
-        url = f"https://graph.facebook.com/v19.0/{page_id}/media"
-        params = {'access_token': FB_ACCESS_TOKEN, 'upload_type': 'resumable', 'media_type': 'REELS', 'caption': caption}
-        
-        init_res = requests.post(url, params=params).json()
-        upload_uri = init_res.get('uri')
-        video_id = init_res.get('id')
+    matched_row = None
 
-        if not upload_uri or not video_id:
-            print(f"❌ IG Init Failed: {init_res}")
-            if os.path.exists(local_file): os.remove(local_file)
-            return None
+    for i in range(1, len(rows)):
+        row = rows[i]
 
-        print(f"   - Uploading bytes...")
-        file_size = os.path.getsize(local_file)
-        with open(local_file, 'rb') as f:
-            headers = {'Authorization': f'OAuth {FB_ACCESS_TOKEN}', 'offset': '0', 'file_size': str(file_size)}
-            upload_res = requests.post(upload_uri, data=f, headers=headers)
-        
-        if upload_res.status_code != 200:
-            print(f"❌ Upload Failed: {upload_res.text}")
-            if os.path.exists(local_file): os.remove(local_file)
-            return None
+        if len(row) <= STATUS_COL:
+            continue
 
-        print(f"   - Uploaded. ID: {video_id}. Waiting 60s for publishing...")
-        if os.path.exists(local_file): os.remove(local_file)
-        time.sleep(60)
-        
-        pub_url = f"https://graph.facebook.com/v19.0/{page_id}/media_publish"
-        pub_params = {'creation_id': video_id, 'access_token': FB_ACCESS_TOKEN}
-        pub_res = requests.post(pub_url, params=pub_params).json()
-        
-        if pub_res.get('id'):
-            print(f"✅ IG Published! ID: {pub_res['id']}")
-            return "IG_SUCCESS" # Instagram doesn't give public link immediately
-        return None
-    except Exception as e:
-        print(f"❌ IG Error: {e}")
-        if os.path.exists(local_file): os.remove(local_file)
-        return None
+        status = row[STATUS_COL].strip().upper()
+        if status != "PENDING":
+            continue
 
-# --- YOUTUBE ---
-def youtube_post(row, row_num):
-    account_name = str(row.get('Account_Name', '')).strip()
-    youtube = get_youtube_service(account_name)
-    if not youtube: 
-        print(f"❌ Skipping YouTube for {account_name} (No Token or Setup Issue)")
-        return None
+        try:
+            sheet_date = datetime.strptime(row[DATE_COL].strip(), "%m-%d-%Y").date()
+        except:
+            continue
 
-    video_url = row.get('Video_URL')
-    local_file = download_video(video_url)
-    if not local_file: return None
+        sheet_day = row[DAY_COL].strip()
+        sheet_time = parse_sheet_time(row[TIME_COL])
 
-    base_title = row.get('Base_Title', 'New Video')
-    # Title logic: Keep it short if needed
-    final_title = f"{base_title}"[:100]
-    description = row.get('Caption', '')
-    tags = str(row.get('Tags', 'shorts,viral')).split(',')
+        if not sheet_time:
+            continue
 
-    body = {
-        'snippet': {'title': final_title, 'description': description, 'categoryId': '22', 'tags': tags},
-        'status': {'privacyStatus': 'public'}
-    }
+        if sheet_date != today_date:
+            continue
 
-    print(f"🚀 Uploading to YouTube ({account_name})...")
-    media = MediaFileUpload(local_file, chunksize=-1, resumable=True)
-    
-    try:
-        req = youtube.videos().insert(part=','.join(body.keys()), body=body, media_body=media)
-        resp = None
-        while resp is None:
-            status, resp = req.next_chunk()
-            if status: print(f"   - Uploading {int(status.progress() * 100)}%...")
-        
-        video_id = resp.get('id')
-        print(f"✅ YouTube Upload Success! ID: {video_id}")
-        if os.path.exists(local_file): os.remove(local_file)
-        return f"https://youtu.be/{video_id}" 
-    except Exception as e:
-        print(f"❌ YouTube Upload Error: {e}")
-        if os.path.exists(local_file): os.remove(local_file)
-        return None
+        if sheet_day.lower() != today_day.lower():
+            continue
 
-# --- PINTEREST ---
-def pinterest_post(row, row_num):
-    if not PINTEREST_SESSION or not PINTEREST_BOARD_ID:
-        print("⚠️ Pinterest details missing in Secrets. Skipping.")
-        return None
+        sheet_dt = datetime.combine(today_date, sheet_time, tzinfo=IST)
+        diff = abs((now - sheet_dt).total_seconds()) / 60
 
-    # We need a LINK to pin (YouTube link is best)
-    # So user must put YouTube link in 'Link' column OR 'Video_URL'
-    link_to_pin = str(row.get('Link', '')).strip()
-    
-    # If Link column is empty, check Video_URL (but Pinterest prefers YouTube links)
-    if not link_to_pin:
-        print("⚠️ No Link found in 'Link' column to Pin. (Upload to YouTube first!)")
-        return None
+        if diff <= TIME_BUFFER_MIN:
+            matched_row = i + 1
+            break
 
-    print(f"📌 Pinning to Pinterest Board: {PINTEREST_BOARD_ID}...")
-    
-    caption = row.get('Caption', 'Check this out!')
-    
-    # Use a default image if none provided (Pinterest needs an image cover)
-    # Ideally, we should upload a thumbnail, but for now we use a placeholder or extract from YT
-    image_url = "https://i.pinimg.com/736x/16/09/27/160927643666b69d9c2409748684497e.jpg"
-
-    session = requests.Session()
-    session.cookies.set("_pinterest_sess", PINTEREST_SESSION)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        "X-Requested-With": "XMLHttpRequest",
-        # CSRF handling
-        "X-CSRFToken": "1234" 
-    }
-
-    try:
-        # 1. Connect to get valid CSRF
-        session.get("https://www.pinterest.com/", headers=headers)
-        headers["X-CSRFToken"] = session.cookies.get("csrftoken")
-
-        # 2. Create Pin
-        url = "https://www.pinterest.com/resource/PinResource/create/"
-        data = {
-            "options": {
-                "board_id": PINTEREST_BOARD_ID,
-                "description": caption,
-                "link": link_to_pin,
-                "image_url": image_url,
-                "method": "scraped",
-                "section": None
-            },
-            "context": {}
-        }
-        
-        resp = session.post(url, headers=headers, data={"source_url": "/", "data": json.dumps(data)})
-        resp_json = resp.json()
-
-        if "resource_response" in resp_json and "data" in resp_json["resource_response"]:
-            pin_id = resp_json["resource_response"]["data"]["id"]
-            print(f"✅ Pinterest Success! Pin ID: {pin_id}")
-            return f"https://pinterest.com/pin/{pin_id}"
-        else:
-            print(f"❌ Pinterest Failed: {resp_json}")
-            return None
-
-    except Exception as e:
-        print(f"❌ Pinterest Error: {e}")
-        return None
-
-# ==============================================================================
-# 4. MAIN AUTOMATION ENGINE
-# ==============================================================================
-
-def run_master_automation():
-    sheet = get_sheet_service()
-    if not sheet: return
-
-    try:
-        data = sheet.get_all_records()
-        if not data: return
-        headers = list(data[0].keys())
-        sheet_headers = sheet.row_values(1)
-        
-        def get_col_idx(name):
-            try: return next(i for i, v in enumerate(sheet_headers) if v.lower() == name.lower()) + 1
-            except: return None
-
-        status_col_idx = get_col_idx('Status')
-        link_col_idx = get_col_idx('Link')
-        if not status_col_idx: return
-
-    except Exception as e:
-        print(f"❌ Data Read Error: {e}")
+    if not matched_row:
+        print("⏸️ No matching task. Sleeping.")
         return
 
-    print(f"🚀 Automation Started. Rows found: {len(data)}")
+    print(f"🎯 MATCH FOUND AT ROW {matched_row}")
 
-    for i, row in enumerate(data):
-        row_num = i + 2
-        
-        # Get Status and Platform safely
-        status_key = next((h for h in headers if h.lower() == 'status'), None)
-        current_status = str(row.get(status_key, '')).strip().upper()
-        
-        platform_key = next((h for h in headers if h.lower() == 'platform'), None)
-        platform = str(row.get(platform_key, '')).strip().lower()
+    # DRY RUN ACTION
+    sheet.update_cell(matched_row, STATUS_COL + 1, "DONE")
+    sheet.update_cell(matched_row, LOG_COL + 1, f"EXECUTED @ {now.strftime('%I:%M %p')}")
 
-        # Process if PENDING or FAIL
-        if current_status in ['PENDING', 'FAIL'] and platform:
-            if current_status == 'DONE': continue
-
-            print(f"Processing Row {row_num}: {platform}")
-            result_link = None
-            
-            # --- LOGIC SELECTOR ---
-            if 'instagram' in platform or 'facebook' in platform:
-                result_link = instagram_post(row, row_num)
-                
-            elif 'youtube' in platform:
-                result_link = youtube_post(row, row_num)
-                
-            elif 'pinterest' in platform:
-                # Pinterest needs a link (from YouTube) to pin
-                result_link = pinterest_post(row, row_num)
-            
-            # --- UPDATE SHEET ---
-            if result_link:
-                safe_update_cell(sheet, row_num, status_col_idx, 'DONE')
-                if link_col_idx and "http" in str(result_link):
-                    safe_update_cell(sheet, row_num, link_col_idx, result_link)
-                print(f"✅ Row {row_num} DONE. Link: {result_link}")
-            else:
-                # If failed, mark FAIL but don't stop
-                safe_update_cell(sheet, row_num, status_col_idx, 'FAIL')
-                print(f"❌ Row {row_num} FAIL")
+    print("✅ DRY RUN COMPLETE – STATUS UPDATED")
 
 if __name__ == "__main__":
-    run_master_automation()
+    main()
