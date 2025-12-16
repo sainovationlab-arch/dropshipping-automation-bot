@@ -1,39 +1,50 @@
-name: Content Auto Bot (Final)
+name: Master Content Automation Bot
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '40 * * * *'
+    - cron: "*/5 * * * *"   # Every 5 minutes
+  workflow_dispatch:        # Manual run option
 
 jobs:
-  run_bot:
+  run-bot:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
       - name: Set up Python
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-      
-      - name: Install Libraries
-        run: pip install gspread google-auth google-api-python-client oauth2client requests gdown tenacity
+          python-version: "3.10"
 
-      - name: Run Master Bot
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Master Bot (Scheduler Brain)
         env:
-          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
-          
-          # 👇 8 ચેનલની 8 નવી ચાવીઓ
-          YT_PEARL_VERSE: ${{ secrets.YT_PEARL_VERSE }}
-          YT_OPUS_ELITE: ${{ secrets.YT_OPUS_ELITE }}
-          YT_DIAMOND_DICE: ${{ secrets.YT_DIAMOND_DICE }}
-          YT_EMERALD_EDGE: ${{ secrets.YT_EMERALD_EDGE }}
-          YT_ROYAL_NEXUS: ${{ secrets.YT_ROYAL_NEXUS }}
-          YT_GRAND_ORBIT: ${{ secrets.YT_GRAND_ORBIT }}
-          YT_URBAN_GLINT: ${{ secrets.YT_URBAN_GLINT }}
-          YT_LUXI_VIBE: ${{ secrets.YT_LUXI_VIBE }}
+          # ===== GOOGLE SHEETS =====
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GCP_CREDENTIALS }}
 
-          # 👇 Content Sheet ID (આ તમારી Content Sheet છે)
-          SPREADSHEET_ID: '1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY'
-        
-        run: python master_bot_final.py
+          SHEET_CONTENT_URL: ${{ secrets.SHEET_CONTENT_URL }}
+          SHEET_DROPSHIPPING_URL: ${{ secrets.SHEET_DROPSHIPPING_URL }}
+
+          # ===== META / INSTAGRAM =====
+          FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
+
+          # ===== YOUTUBE =====
+          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+
+          # ===== PINTEREST =====
+          PINTEREST_TOKEN_DIAMOND: ${{ secrets.PINTEREST_TOKEN_DIAMOND }}
+          PINTEREST_TOKEN_EMERALD: ${{ secrets.PINTEREST_TOKEN_EMERALD }}
+          PINTEREST_TOKEN_LUXYTE: ${{ secrets.PINTEREST_TOKEN_LUXYTE }}
+          PINTEREST_TOKEN_OPUS: ${{ secrets.PINTEREST_TOKEN_OPUS }}
+          PINTEREST_TOKEN_PEARL: ${{ secrets.PINTEREST_TOKEN_PEARL }}
+          PINTEREST_TOKEN_ROYAL: ${{ secrets.PINTEREST_TOKEN_ROYAL }}
+          PINTEREST_TOKEN_URBAN: ${{ secrets.PINTEREST_TOKEN_URBAN }}
+
+        run: |
+          python master_bot_final.py
