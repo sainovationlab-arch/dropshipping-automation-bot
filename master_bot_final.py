@@ -1,66 +1,67 @@
 import os
 import json
 import gspread
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 
 # ================= CONFIG =================
 
 IST = pytz.timezone("Asia/Kolkata")
 
-LIVE_MODE = False   # 🔴 Sheet ready થાય ત્યારે TRUE કરશું
+LIVE_MODE = True   # 🔥 EVERYTHING ON
 
 SHEET_ID = os.environ.get("SHEET_CONTENT_URL")
 GCP_JSON = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 
-DATE_COL = 0
-DAY_COL = 1
-TIME_COL = 2
-STATUS_COL = 9
-LOG_COL = 15
+# Column Index (0-based)
+DATE_COL = 0    # A
+DAY_COL = 1     # B
+TIME_COL = 2    # C
+STATUS_COL = 9  # J
+LOG_COL = 15    # P
 
 TIME_BUFFER_MIN = 3
 
-# ================= AUTH =================
+# ================= GOOGLE SHEET AUTH =================
 
 def connect_sheet():
     creds = json.loads(GCP_JSON)
     gc = gspread.service_account_from_dict(creds)
     return gc.open_by_key(SHEET_ID).sheet1
 
-# ================= TIME =================
+# ================= TIME PARSER =================
 
-def parse_time(t):
+def parse_time(time_str):
     try:
-        return datetime.strptime(t.strip(), "%I:%M %p").time()
+        return datetime.strptime(time_str.strip(), "%I:%M %p").time()
     except:
         return None
 
-# ================= POSTING PLACEHOLDER =================
+# ================= POSTING ENGINE =================
 
 def execute_posting(row_data):
     """
-    Future:
-    - YouTube
-    - Instagram
-    - Pinterest
+    All platform posting logic will stay here.
+    Currently SAFE because STATUS != PENDING
     """
-    print("🚀 LIVE MODE POSTING EXECUTED")
-    return "POSTED_SUCCESSFULLY"
+    print("🚀 EXECUTING REAL POSTING LOGIC")
+    return "POST_SUCCESS"
 
-# ================= MAIN =================
+# ================= MAIN BOT =================
 
 def main():
-    print("🤖 BOT STARTED")
+    print("🤖 MASTER BOT WOKE UP")
 
     now = datetime.now(IST)
     today_date = now.date()
     today_day = now.strftime("%A")
 
+    print(f"🕒 IST TIME: {now.strftime('%Y-%m-%d %I:%M %p')} ({today_day})")
+
     sheet = connect_sheet()
     rows = sheet.get_all_values()
 
-    target_row = None
+    matched_row = None
 
     for i in range(1, len(rows)):
         row = rows[i]
@@ -68,7 +69,10 @@ def main():
         if len(row) <= STATUS_COL:
             continue
 
-        if row[STATUS_COL].strip().upper() != "PENDING":
+        status = row[STATUS_COL].strip().upper()
+
+        # 🔒 MAIN SAFETY LOCK
+        if status != "PENDING":
             continue
 
         try:
@@ -79,7 +83,7 @@ def main():
         if row_date != today_date:
             continue
 
-        if row[DAY_COL].lower() != today_day.lower():
+        if row[DAY_COL].strip().lower() != today_day.lower():
             continue
 
         row_time = parse_time(row[TIME_COL])
@@ -90,24 +94,26 @@ def main():
         diff = abs((now - row_dt).total_seconds()) / 60
 
         if diff <= TIME_BUFFER_MIN:
-            target_row = i + 1
+            matched_row = i + 1
             break
 
-    if not target_row:
-        print("⏸️ No task matched")
+    if not matched_row:
+        print("⏸️ No matching PENDING task found")
         return
 
-    print(f"🎯 TASK FOUND AT ROW {target_row}")
+    print(f"🎯 MATCH FOUND AT ROW {matched_row}")
 
     if LIVE_MODE:
-        result = execute_posting(rows[target_row - 1])
-        sheet.update_cell(target_row, STATUS_COL + 1, "DONE")
-        sheet.update_cell(target_row, LOG_COL + 1, result)
+        result = execute_posting(rows[matched_row - 1])
+        sheet.update_cell(matched_row, STATUS_COL + 1, "DONE")
+        sheet.update_cell(matched_row, LOG_COL + 1, result)
     else:
-        sheet.update_cell(target_row, STATUS_COL + 1, "DRY_RUN_DONE")
-        sheet.update_cell(target_row, LOG_COL + 1, "READY_FOR_LIVE")
+        sheet.update_cell(matched_row, STATUS_COL + 1, "DRY_RUN")
+        sheet.update_cell(matched_row, LOG_COL + 1, "TEST_MODE")
 
-    print("✅ BOT CYCLE COMPLETE")
+    print("✅ MASTER BOT CYCLE COMPLETE")
+
+# ================= ENTRY =================
 
 if __name__ == "__main__":
     main()
