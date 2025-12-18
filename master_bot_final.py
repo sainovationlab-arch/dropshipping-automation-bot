@@ -10,8 +10,7 @@ from google.oauth2.service_account import Credentials
 IST = pytz.timezone("Asia/Kolkata")
 TIME_BUFFER_MIN = 3
 
-# BOT MODE: CONTENT or DROPSHIP
-BOT_MODE = "CONTENT"
+BOT_MODE = "CONTENT"  # CONTENT or DROPSHIP
 
 CONTENT_SHEET_ID = "1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY"
 DROPSHIP_SHEET_ID = "1lrn-plbxc7w4wHBLYoCfP_UYIP6EVJbj79IdBUP5sgs"
@@ -42,9 +41,15 @@ def connect_sheet():
     client = gspread.authorize(creds)
 
     if BOT_MODE == "CONTENT":
-        return client.open_by_key(CONTENT_SHEET_ID).worksheet("Content_Sheet")
+        spreadsheet = client.open_by_key(CONTENT_SHEET_ID)
     else:
-        return client.open_by_key(DROPSHIP_SHEET_ID).worksheet("Sheet1")
+        spreadsheet = client.open_by_key(DROPSHIP_SHEET_ID)
+
+    # 🔥 AUTO PICK FIRST WORKSHEET (NO NAME ISSUE)
+    sheet = spreadsheet.get_worksheet(0)
+
+    print("✅ Connected to sheet:", sheet.title)
+    return sheet
 
 # ================= TIME =================
 
@@ -66,7 +71,7 @@ def build_content(row):
 
 def post(platform, title, caption):
     print(f"🚀 Posting to {platform.upper()}")
-    print(title)
+    print("TITLE:", title)
     return f"{platform.upper()}_POSTED"
 
 # ================= MAIN =================
