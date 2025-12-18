@@ -49,12 +49,18 @@ YOUTUBE_PROJECT_MAP = {
 # ==============================================================================
 
 def get_val(row, keys):
-    """Smart Column Reader"""
+    """Smart Column Reader - Case Insensitive"""
+    # Create a normalized map of the row keys
     normalized_row = {k.lower().replace(" ", "").replace("_", ""): v for k, v in row.items()}
+    
     for key in keys:
+        # 1. Direct match
         if key in row: return str(row[key]).strip()
+        
+        # 2. Normalized match
         norm_key = key.lower().replace(" ", "").replace("_", "")
         if norm_key in normalized_row: return str(normalized_row[norm_key]).strip()
+        
     return ""
 
 def get_sheet_service():
@@ -108,9 +114,11 @@ def safe_update_cell(sheet, row, col, value):
 # ==============================================================================
 
 def instagram_post(row, row_num):
-    account = get_val(row, ['Account_Name', 'Account Name', 'Brand', 'AccountName'])
+    # Updated to look for 'Brand_Name' specifically based on your logs
+    account = get_val(row, ['Brand_Name', 'BrandName', 'Account_Name', 'Account Name', 'Brand'])
+    
     if not account:
-        print(f"⚠️ Row {row_num}: No Account Name found.")
+        print(f"⚠️ Row {row_num}: No Brand Name found.")
         return None
 
     page_id = INSTAGRAM_IDS.get(account)
@@ -118,9 +126,14 @@ def instagram_post(row, row_num):
         print(f"⚠️ Row {row_num}: No ID for '{account}'")
         return None
     
-    video_url = get_val(row, ['Video_URL', 'Video URL'])
-    caption = get_val(row, ['Caption', 'Title'])
-    tags = get_val(row, ['Tags', 'Hashtags'])
+    video_url = get_val(row, ['Video_URL', 'Video URL', 'Video Link'])
+    
+    # Construct Caption from Title_Hook + Description + Hashtags
+    title_hook = get_val(row, ['Title_Hook', 'Title', 'Caption'])
+    desc = get_val(row, ['Description', 'Desc'])
+    hashtags = get_val(row, ['Caption_Hashtags', 'Tags', 'Hashtags'])
+    
+    final_caption = f"{title_hook}\n\n{desc}\n\n{hashtags}"
     
     local = download_video_locally(video_url)
     if not local: return None
@@ -132,7 +145,7 @@ def instagram_post(row, row_num):
     print(f"📸 Posting to Insta: {account}")
     try:
         url = f"https://graph.facebook.com/v19.0/{page_id}/media"
-        res = requests.post(url, params={'access_token': FB_ACCESS_TOKEN, 'media_type': 'REELS', 'video_url': catbox, 'caption': f"{caption}\n\n{tags}"}).json()
+        res = requests.post(url, params={'access_token': FB_ACCESS_TOKEN, 'media_type': 'REELS', 'video_url': catbox, 'caption': final_caption}).json()
         if not res.get('id'): 
             print(f"❌ IG Init Failed: {res}")
             return None
@@ -145,7 +158,9 @@ def instagram_post(row, row_num):
         return None
 
 def youtube_post(row, row_num):
-    account = get_val(row, ['Account_Name', 'Account Name', 'Brand'])
+    # Updated to look for 'Brand_Name'
+    account = get_val(row, ['Brand_Name', 'BrandName', 'Account_Name', 'Account Name', 'Brand'])
+    
     token = YOUTUBE_PROJECT_MAP.get(account)
     if not token: 
         print(f"❌ No YouTube Token for '{account}'")
@@ -156,18 +171,22 @@ def youtube_post(row, row_num):
     if not local: return None
     
     try:
-        # Use UserCredentials for YouTube
         creds = UserCredentials.from_authorized_user_info(json.loads(token))
         youtube = build('youtube', 'v3', credentials=creds)
         
-        caption = get_val(row, ['Caption', 'Title'])
-        tags = get_val(row, ['Tags', 'Hashtags'])
+        # Mappings based on your sheet headers
+        title = get_val(row, ['Title_Hook', 'Title', 'Caption'])[:100] # YouTube limit 100 chars
+        desc = get_val(row, ['Description', 'Desc'])
+        hashtags = get_val(row, ['Caption_Hashtags', 'Tags'])
+        
+        full_desc = f"{title}\n\n{desc}\n\n{hashtags}"
+        tags_list = hashtags.replace("#", "").replace(" ", "").split(',')
         
         body = {
             'snippet': {
-                'title': caption[:100], 
-                'description': f"{caption}\n{tags}", 
-                'tags': tags.split(','), 
+                'title': title, 
+                'description': full_desc, 
+                'tags': tags_list, 
                 'categoryId': '22'
             }, 
             'status': {
