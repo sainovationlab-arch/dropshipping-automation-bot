@@ -26,11 +26,23 @@ BRAND_CONFIG = {
 # 2. HELPER FUNCTIONS
 # ==============================================================================
 
+def clean_text(text):
+    """Removes extra spaces, newlines, and hidden characters"""
+    if not text: return ""
+    return str(text).strip().replace("\n", "").replace("\r", "")
+
+def clean_board_id(board_id):
+    """Extracts only numbers from Board ID if mixed with text"""
+    if not board_id: return None
+    # Sirf numbers ko bahar nikalega (Agar 'Board Id:- 123/' likha hai to bhi fix karega)
+    match = re.search(r'\d+', str(board_id))
+    return match.group(0) if match else board_id.strip()
+
 def get_env_var(keys):
     """Find secret from environment variables"""
     for key in keys:
         val = os.environ.get(key)
-        if val: return val
+        if val: return clean_text(val)
     return None
 
 def get_val(row, keys):
@@ -93,7 +105,8 @@ def download_video(url, filename):
 
 def upload_video_v5(access_token, file_path):
     print("📤 Registering Upload with Pinterest...")
-    auth_headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+    # CRITICAL FIX: .strip() added here
+    auth_headers = {"Authorization": f"Bearer {clean_text(access_token)}", "Content-Type": "application/json"}
     
     # 1. Register
     try:
@@ -128,28 +141,36 @@ def upload_video_v5(access_token, file_path):
         return media_id # Try anyway if stuck in processing
         
     except Exception as e:
-        print(f"❌ API Error: {e}")
+        print(f"❌ API Error during Upload: {e}")
         return None
 
 def create_pin_v5(access_token, board_id, media_id, title, desc, link):
-    print(f"📌 Creating Pin on Board: {board_id}")
+    # Cleaning Board ID before using
+    clean_board = clean_board_id(board_id)
+    print(f"📌 Creating Pin on Board: {clean_board}")
+    
     url = "https://api.pinterest.com/v5/pins"
-    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+    # CRITICAL FIX: .strip() added here
+    headers = {"Authorization": f"Bearer {clean_text(access_token)}", "Content-Type": "application/json"}
     
     payload = {
-        "board_id": board_id,
+        "board_id": clean_board,
         "media_source": {"source_type": "video_id", "media_id": media_id},
         "title": title[:100],
         "description": desc[:500],
     }
     if link and "http" in link: payload["link"] = link
     
-    r = requests.post(url, headers=headers, json=payload)
-    if r.status_code == 201:
-        print(f"✅ PIN SUCCESS! ID: {r.json()['id']}")
-        return True
-    else:
-        print(f"❌ Pin Failed: {r.text}")
+    try:
+        r = requests.post(url, headers=headers, json=payload)
+        if r.status_code == 201:
+            print(f"✅ PIN SUCCESS! ID: {r.json()['id']}")
+            return True
+        else:
+            print(f"❌ Pin Failed: {r.text}")
+            return False
+    except Exception as e:
+        print(f"❌ API Error during Pin Creation: {e}")
         return False
 
 # ==============================================================================
@@ -163,6 +184,10 @@ def run_pinterest_bot():
 
     try:
         all_values = sheet.get_all_values()
+        if not all_values:
+            print("❌ Sheet is empty.")
+            return
+
         headers = [str(h).strip() for h in all_values[0]]
         print(f"📊 Headers: {headers}")
         
@@ -187,6 +212,7 @@ def run_pinterest_bot():
             status = get_val(row, ['Status']).upper()
             platform = get_val(row, ['Platform']).lower()
             
+            # Check if row is pending and platform is Pinterest
             if status == 'PENDING' and 'pinterest' in platform:
                 brand = get_val(row, ['Brand_Name', 'Account_Name', 'Brand'])
                 print(f"\n--- Processing Row {row_num}: {brand} ---")
@@ -197,11 +223,12 @@ def run_pinterest_bot():
                     print(f"⚠️ No config found for brand: {brand}")
                     continue
                 
-                token = os.environ.get(config['token'])
-                board = os.environ.get(config['board'])
+                # Fetching from ENV and Cleaning immediately
+                token = get_env_var([config['token']])
+                board = get_env_var([config['board']])
                 
                 if not token or not board:
-                    print(f"❌ Missing Secrets for {brand}. Check GitHub Settings.")
+                    print(f"❌ Missing Secrets (Token/Board) for {brand}. Check .env or GitHub Secrets.")
                     continue
                 
                 # Prepare Data
@@ -209,8 +236,13 @@ def run_pinterest_bot():
                 title = get_val(row, ['Title_Hook', 'Title'])
                 desc = get_val(row, ['Description', 'Caption'])
                 tags = get_val(row, ['Caption_Hashtags', 'Tags'])
-                link = get_val(row, ['Link', 'Product_Link']) # Link to product or YouTube
+                link = get_val(row, ['Link', 'Product_Link'])
                 
+                if not video_url:
+                    print("❌ No Video URL found.")
+                    sheet.update_cell(row_num, status_col, 'NO_VIDEO')
+                    continue
+
                 full_desc = f"{desc}\n\n{tags}"
                 
                 # Execute
