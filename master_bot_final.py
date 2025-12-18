@@ -1,219 +1,342 @@
-# master_bot_final.py
-# Paste this exact file into your repo (replace old file).
-# Requires secrets: GOOGLE_APPLICATION_CREDENTIALS_JSON, INSTAGRAM_ACCESS_TOKEN, INSTAGRAM_USER_IDS
-# Run in GitHub Actions where the secrets are injected as env vars.
-
 import os
 import json
 import time
+import random
 import requests
 import re
-import difflib
-from datetime import datetime
-import pytz
 import gspread
 from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from tenacity import retry, stop_after_attempt, wait_fixed
 
-# ------------- CONFIG -------------
-IST = pytz.timezone("Asia/Kolkata")
-TIME_BUFFER_MIN = 30
-GRAPH_URL = "https://graph.facebook.com/v19.0"
+# ==============================================================================
+# 1. CONFIGURATION & SECRETS SETUP
+# ==============================================================================
 
-# Secrets / env
-GCP_JSON = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-INSTAGRAM_TOKEN = os.environ.get("INSTAGRAM_ACCESS_TOKEN")
-RAW_IG_MAP = json.loads(os.environ.get("INSTAGRAM_USER_IDS", "{}"))
-SHEET_ID = os.environ.get("SHEET_CONTENT_URL") 
+# General Secrets
+# ડ્રોપશિપિંગ અને કન્ટેન્ટ બંને શીટ માટે અલગ ID વાપરી શકાય, પણ અત્યારે મેઈન શીટ લઈએ.
+SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID") 
+GCP_CREDENTIALS_JSON = os.environ.get("GCP_CREDENTIALS")
+FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# Sheet columns
-DATE_COL = 0
-DAY_COL = 1
-TIME_COL = 2
-BRAND_COL = 3
-PLATFORM_COL = 4
-VIDEO_NAME_COL = 5
-VIDEO_URL_COL = 6
-TITLE_COL = 7
-HASHTAG_COL = 8
-DESC_COL = 9
-STATUS_COL = 10
-LIVE_URL_COL = 11
-LOG_COL = 15
+# Pinterest Secrets
+PINTEREST_SESSION = os.environ.get("PINTEREST_SESSION")
+PINTEREST_BOARD_ID = os.environ.get("PINTEREST_BOARD_ID")
 
-# Behavior tuning
-MAX_IG_PROCESS_WAIT_SEC = 300
-IG_POLL_INTERVAL = 10 
-HTTP_TIMEOUT = 60 
+# Instagram IDs Mapping
+INSTAGRAM_IDS = {
+    "Emerald Edge": "17841478369307404",
+    "Urban Glint": "17841479492205083",
+    "Diamond Dice": "17841478369307404",
+    "Grand Orbit": "17841479516066757",
+    "Opus": "17841479493645419",
+    "Opus Elite": "17841479493645419",
+    "Pearl Verse": "17841478822408000",
+    "Royal Nexus": "17841479056452004",
+    "Luxivibe": "17841479492205083"
+}
 
-# ------------- Utils -------------
-def normalize_text(s: str) -> str:
-    if not s: return ""
-    return re.sub(r"[^a-z0-9]", "", s.lower())
+# YouTube Channel Mapping
+YOUTUBE_PROJECT_MAP = {
+    "Pearl Verse": os.environ.get("YT_PEARL_VERSE"),
+    "Opus Elite": os.environ.get("YT_OPUS_ELITE"),
+    "Diamond Dice": os.environ.get("YT_DIAMOND_DICE"),
+    "Emerald Edge": os.environ.get("YT_EMERALD_EDGE"),
+    "Royal Nexus": os.environ.get("YT_ROYAL_NEXUS"),
+    "Grand Orbit": os.environ.get("YT_GRAND_ORBIT"),
+    "Urban Glint": os.environ.get("YT_URBAN_GLINT"),
+    "Luxivibe": os.environ.get("YT_LUXI_VIBE")
+}
 
-def is_google_drive_link(url: str):
-    return "drive.google.com" in url
+# ==============================================================================
+# 2. HELPER FUNCTIONS (Robust Download & Catbox)
+# ==============================================================================
 
-def drive_direct_download(url: str):
-    # Convert View Link to Direct Download Link
-    # This works best for files < 100MB
+def get_sheet_service():
+    try:
+        if not GCP_CREDENTIALS_JSON:
+            print("❌ FATAL: GCP_CREDENTIALS secret is missing!")
+            return None
+        creds_dict = json.loads(GCP_CREDENTIALS_JSON)
+        creds = Credentials.from_service_account_info(
+            creds_dict,
+            scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+        )
+        client = gspread.authorize(creds)
+        # SPREADSHEET_ID environment variable માં હોવું જરૂરી છે
+        return client.open_by_key(SPREADSHEET_ID).sheet1
+    except Exception as e:
+        print(f"❌ Sheet Connection Error: {e}")
+        return None
+
+def drive_direct_download(url):
+    """Google Drive Link ને ડાયરેક્ટ ડાઉનલોડ લિંકમાં ફેરવે છે"""
     m = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
     if m:
-        fid = m.group(1)
-        return f"https://drive.google.com/uc?export=download&id={fid}"
+        return f"https://drive.google.com/uc?export=download&confirm=t&id={m.group(1)}"
     m2 = re.search(r"id=([a-zA-Z0-9_-]+)", url)
     if m2:
-        return f"https://drive.google.com/uc?export=download&id={m2.group(1)}"
+        return f"https://drive.google.com/uc?export=download&confirm=t&id={m2.group(1)}"
     return url
 
-# ------------- Google Sheet connect -------------
-def connect_sheet():
-    creds = Credentials.from_service_account_info(
-        json.loads(GCP_JSON),
-        scopes=["https://www.googleapis.com/auth/spreadsheets"]
-    )
-    gc = gspread.authorize(creds)
-    if SHEET_ID.startswith("http"):
-        ss = gc.open_by_url(SHEET_ID)
-    else:
-        ss = gc.open_by_key(SHEET_ID)
-    sheet = ss.get_worksheet(0)
-    print("✅ Connected to sheet:", sheet.title)
-    return sheet
-
-# ------------- Instagram Helpers -------------
-def ig_create_container(ig_user_id, video_url, caption):
-    print(f"📡 Sending URL to Instagram: {video_url}")
-    url = f"{GRAPH_URL}/{ig_user_id}/media"
-    payload = {
-        "media_type": "REELS",
-        "video_url": video_url,
-        "caption": caption,
-        "access_token": INSTAGRAM_TOKEN
-    }
-    r = requests.post(url, data=payload, timeout=HTTP_TIMEOUT)
+def download_video_locally(url):
+    """વિડીયો લોકલ ડાઉનલોડ કરે છે (YouTube માટે જરૂરી)"""
+    print(f"⬇️ Downloading video...")
+    if "drive.google.com" in url:
+        url = drive_direct_download(url)
     
-    # Catching common errors
-    if r.status_code != 200:
-        print(f"❌ Instagram Refused: {r.text}")
-        if "video_url" in r.text:
-             raise Exception("Instagram couldn't download from Drive directly. Ensure Link is 'Anyone with link'")
-        raise Exception(f"IG Create Error: {r.text}")
-        
-    return r.json().get("id")
-
-def ig_check_status(container_id):
-    url = f"{GRAPH_URL}/{container_id}"
-    r = requests.get(url, params={"fields": "status_code,status", "access_token": INSTAGRAM_TOKEN}, timeout=HTTP_TIMEOUT)
-    r.raise_for_status()
-    data = r.json()
-    return data.get("status_code") or data.get("status")
-
-def ig_publish(ig_user_id, creation_id):
-    url = f"{GRAPH_URL}/{ig_user_id}/media_publish"
-    r = requests.post(url, data={"creation_id": creation_id, "access_token": INSTAGRAM_TOKEN}, timeout=HTTP_TIMEOUT)
+    filename = f"temp_{random.randint(1000,9999)}.mp4"
     try:
-        r.raise_for_status()
-    except:
-        print(f"❌ Publish Failed: {r.text}")
-        raise
-    return r.json().get("id")
+        with requests.get(url, stream=True, timeout=60) as r:
+            r.raise_for_status()
+            with open(filename, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        return filename
+    except Exception as e:
+        print(f"❌ Local Download Error: {e}")
+        return None
 
-# ------------- Main posting flow -------------
-def post_video_to_ig(brand_name, video_url, caption, sheet, row_index):
-    # Mapping logic
-    ig_user_id = None
-    target = normalize_text(brand_name)
-    best_score = 0
-    for k, v in RAW_IG_MAP.items():
-        score = difflib.SequenceMatcher(None, target, normalize_text(k)).ratio()
-        if score > best_score:
-            best_score = score
-            ig_user_id = v
+def upload_to_catbox(local_path):
+    """Instagram માટે Catbox પર અપલોડ કરે છે (Best for Reels)"""
+    print("🐱 Uploading to Catbox (Insta Helper)...")
+    url = "https://catbox.moe/user/api.php"
+    try:
+        with open(local_path, "rb") as f:
+            payload = {"reqtype": "fileupload", "userhash": ""}
+            files = {"fileToUpload": ("video.mp4", f, "video/mp4")}
+            r = requests.post(url, data=payload, files=files, timeout=300)
+            if r.status_code == 200:
+                return r.text.strip()
+            else:
+                print(f"❌ Catbox Error: {r.text}")
+                return None
+    except Exception as e:
+        print(f"❌ Catbox Exception: {e}")
+        return None
+
+def safe_update_cell(sheet, row, col, value):
+    try:
+        sheet.update_cell(row, col, value)
+    except Exception as e:
+        print(f"⚠️ Sheet Update Failed: {e}")
+
+# ==============================================================================
+# 3. PLATFORM POSTING FUNCTIONS
+# ==============================================================================
+
+# --- INSTAGRAM (Updated with Catbox Logic) ---
+def instagram_post(row, row_num):
+    account_name = str(row.get('Account_Name', '')).strip()
+    page_id = INSTAGRAM_IDS.get(account_name)
     
-    if not ig_user_id or best_score < 0.35:
-        raise Exception(f"No IG mapping found for brand: {brand_name}")
-
-    print(f"🎯 Posting to Brand: {brand_name} (ID: {ig_user_id})")
-
-    # DIRECT LINK LOGIC (No Re-upload)
-    if is_google_drive_link(video_url):
-        public_url = drive_direct_download(video_url)
-        print("🔗 Converted to Direct Drive Link")
-    else:
-        public_url = video_url
-
-    # Create container
-    creation_id = ig_create_container(ig_user_id, public_url, caption)
-    print("📦 Container Created ID:", creation_id)
-
-    # Poll status
-    start = time.time()
-    while time.time() - start < MAX_IG_PROCESS_WAIT_SEC:
-        status = ig_check_status(creation_id)
-        print(f"⏳ Status: {status}")
+    if not page_id:
+        print(f"⚠️ No Instagram ID for {account_name}")
+        return None 
         
-        if status == "FINISHED":
-            break
-        if status == "ERROR":
-            raise Exception("Instagram Failed to Process Video (Drive Link Rejected or Format Issue)")
-        time.sleep(IG_POLL_INTERVAL)
-    else:
-        raise Exception("Instagram processing timeout")
+    video_url = row.get('Video_URL')
+    caption = row.get('Caption', '')
+    tags = row.get('Tags', '')
+    final_caption = f"{caption}\n\n{tags}"
 
-    # Publish
-    media_id = ig_publish(ig_user_id, creation_id)
-    return f"https://www.instagram.com/reel/{media_id}/"
+    # 1. Download Locally
+    local_file = download_video_locally(video_url)
+    if not local_file: return None
 
-# ------------- Runner -------------
-def main():
-    print("🤖 MASTER BOT FINAL RUN (DIRECT DRIVE VERSION)")
-    sheet = connect_sheet()
-    rows = sheet.get_all_values()
+    # 2. Upload to Catbox for reliable URL
+    catbox_url = upload_to_catbox(local_file)
+    if os.path.exists(local_file): os.remove(local_file) # Clean up local
     
-    now = datetime.now(IST)
-    print(f"📅 System Time: {now}")
+    if not catbox_url: return None
 
-    for i in range(1, len(rows)):
-        row = rows[i]
+    print(f"📸 Posting to Instagram: {account_name}...")
+
+    try:
+        # 3. Create Container
+        url = f"https://graph.facebook.com/v19.0/{page_id}/media"
+        params = {
+            'access_token': FB_ACCESS_TOKEN,
+            'media_type': 'REELS',
+            'video_url': catbox_url, # Using Catbox URL
+            'caption': final_caption
+        }
+        res = requests.post(url, params=params).json()
+        creation_id = res.get('id')
+
+        if not creation_id:
+            print(f"❌ IG Init Failed: {res}")
+            return None
+
+        print(f"⏳ Processing Instagram (Waiting 30s)...")
+        time.sleep(30)
+        
+        # 4. Publish
+        pub_url = f"https://graph.facebook.com/v19.0/{page_id}/media_publish"
+        pub_params = {'creation_id': creation_id, 'access_token': FB_ACCESS_TOKEN}
+        pub_res = requests.post(pub_url, params=pub_params).json()
+        
+        if pub_res.get('id'):
+            print(f"✅ IG Published! ID: {pub_res['id']}")
+            return "IG_SUCCESS"
+        else:
+            print(f"❌ IG Publish Error: {pub_res}")
+            return None
+
+    except Exception as e:
+        print(f"❌ IG Error: {e}")
+        return None
+
+# --- YOUTUBE ---
+def youtube_post(row, row_num):
+    account_name = str(row.get('Account_Name', '')).strip()
+    clean_name = str(account_name).strip()
+    token_json = YOUTUBE_PROJECT_MAP.get(clean_name)
+    
+    if not token_json:
+        print(f"❌ No YouTube Token found for '{clean_name}'")
+        return None
+
+    video_url = row.get('Video_URL')
+    local_file = download_video_locally(video_url)
+    if not local_file: return None
+
+    title = row.get('Caption', 'New Video')[:100]
+    description = f"{row.get('Caption', '')}\n\n{row.get('Tags', '')}"
+    tags = str(row.get('Tags', 'shorts')).split(',')
+
+    try:
+        creds = Credentials.from_authorized_user_info(json.loads(token_json))
+        youtube = build('youtube', 'v3', credentials=creds)
+
+        body = {
+            'snippet': {'title': title, 'description': description, 'categoryId': '22', 'tags': tags},
+            'status': {'privacyStatus': 'public'}
+        }
+
+        print(f"🚀 Uploading to YouTube ({account_name})...")
+        media = MediaFileUpload(local_file, chunksize=-1, resumable=True)
+        req = youtube.videos().insert(part=','.join(body.keys()), body=body, media_body=media)
+        
+        resp = None
+        while resp is None:
+            status, resp = req.next_chunk()
+            if status: print(f"Uploading... {int(status.progress() * 100)}%")
+        
+        print(f"✅ YouTube Success! ID: {resp['id']}")
+        if os.path.exists(local_file): os.remove(local_file)
+        return f"https://youtu.be/{resp['id']}" 
+    except Exception as e:
+        print(f"❌ YouTube Upload Error: {e}")
+        if os.path.exists(local_file): os.remove(local_file)
+        return None
+
+# --- PINTEREST ---
+def pinterest_post(row, row_num):
+    # Pinterest Logic retained from your file
+    if not PINTEREST_SESSION or not PINTEREST_BOARD_ID:
+        print("⚠️ Pinterest Secrets Missing")
+        return None
+    
+    link_to_pin = str(row.get('Link', '')).strip()
+    if not link_to_pin:
+        print("⚠️ Pinterest needs a Link column value (e.g. YouTube Link)")
+        return None
+
+    print(f"📌 Pinning to Pinterest...")
+    caption = row.get('Caption', 'Check this out!')
+    image_url = "https://i.pinimg.com/736x/16/09/27/160927643666b69d9c2409748684497e.jpg" # Placeholder
+
+    session = requests.Session()
+    session.cookies.set("_pinterest_sess", PINTEREST_SESSION)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "X-CSRFToken": "1234" 
+    }
+
+    try:
+        session.get("https://www.pinterest.com/", headers=headers)
+        headers["X-CSRFToken"] = session.cookies.get("csrftoken")
+
+        url = "https://www.pinterest.com/resource/PinResource/create/"
+        data = {
+            "options": {
+                "board_id": PINTEREST_BOARD_ID,
+                "description": caption,
+                "link": link_to_pin,
+                "image_url": image_url,
+                "method": "scraped",
+            },
+            "context": {}
+        }
+        resp = session.post(url, headers=headers, data={"source_url": "/", "data": json.dumps(data)})
+        if resp.status_code == 200:
+            print(f"✅ Pinterest Success!")
+            return "PIN_SUCCESS"
+        else:
+            print(f"❌ Pinterest Failed: {resp.text}")
+            return None
+    except Exception as e:
+        print(f"❌ Pinterest Error: {e}")
+        return None
+
+# ==============================================================================
+# 4. MAIN AUTOMATION ENGINE
+# ==============================================================================
+
+def run_master_automation():
+    sheet = get_sheet_service()
+    if not sheet: return
+
+    try:
+        data = sheet.get_all_records()
+        if not data: 
+            print("💤 Sheet is empty.")
+            return
+            
+        headers = sheet.row_values(1)
+        # Find column indexes (1-based)
         try:
-            if len(row) <= STATUS_COL: continue
-            status = (row[STATUS_COL] or "").strip().upper()
+            status_col_idx = headers.index('Status') + 1
+            link_col_idx = headers.index('Link') + 1 # For pasting final link
+        except ValueError:
+            print("❌ Error: 'Status' or 'Link' column missing in headers.")
+            return
+
+    except Exception as e:
+        print(f"❌ Data Read Error: {e}")
+        return
+
+    print(f"🚀 Automation Started. Rows found: {len(data)}")
+
+    for i, row in enumerate(data):
+        row_num = i + 2
+        
+        current_status = str(row.get('Status', '')).strip().upper()
+        platform = str(row.get('Platform', '')).strip().lower()
+
+        if current_status == 'PENDING' and platform:
+            print(f"\n--- Processing Row {row_num}: {platform} ---")
+            safe_update_cell(sheet, row_num, status_col_idx, 'PROCESSING')
             
-            if status != "PENDING":
-                continue
-
-            platform = (row[PLATFORM_COL] or "").strip().lower()
-            if "insta" not in platform:
-                continue
-                
-            brand = row[BRAND_COL]
-            video_url = row[VIDEO_URL_COL]
-            title = row[TITLE_COL]
-            desc = row[DESC_COL]
-            tags = row[HASHTAG_COL]
-            caption = f"{title}\n\n{desc}\n\n{tags}"
-
-            print(f"\n🚀 Processing Row {i+1}: {brand}")
-            sheet.update_cell(i+1, LOG_COL+1, "Processing...")
-
-            # Execute Post
-            public_live = post_video_to_ig(brand, video_url, caption, sheet, i+1)
-
-            # Success
-            sheet.update_cell(i+1, STATUS_COL+1, "DONE")
-            sheet.update_cell(i+1, LIVE_URL_COL+1, public_live)
-            sheet.update_cell(i+1, LOG_COL+1, "SUCCESS_IG")
-            print(f"✅ SUCCESS! Link: {public_live}")
+            result_link = None
             
-            return 
-
-        except Exception as e:
-            print(f"❌ ERROR row {i+1}: {str(e)}")
-            sheet.update_cell(i+1, STATUS_COL+1, "FAILED")
-            sheet.update_cell(i+1, LOG_COL+1, str(e))
-            return 
-
-    print("💤 No tasks found.")
+            if 'instagram' in platform:
+                result_link = instagram_post(row, row_num)
+            elif 'youtube' in platform:
+                result_link = youtube_post(row, row_num)
+            elif 'pinterest' in platform:
+                result_link = pinterest_post(row, row_num)
+            
+            # --- UPDATE SHEET ---
+            if result_link:
+                safe_update_cell(sheet, row_num, status_col_idx, 'DONE')
+                if "http" in str(result_link):
+                    safe_update_cell(sheet, row_num, link_col_idx, result_link)
+                print(f"✅ Row {row_num} DONE.")
+            else:
+                safe_update_cell(sheet, row_num, status_col_idx, 'FAIL')
+                print(f"❌ Row {row_num} FAILED.")
 
 if __name__ == "__main__":
-    main()
+    run_master_automation()
