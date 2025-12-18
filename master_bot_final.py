@@ -1,202 +1,175 @@
 import os
-import json
 import time
+import json
 import requests
+import difflib
 from datetime import datetime
-import pytz
 import gspread
 from google.oauth2.service_account import Credentials
-import re
 
-# ================== BASIC CONFIG ==================
+print("🤖 SMART AI BOT STARTED")
 
-IST = pytz.timezone("Asia/Kolkata")
-TIME_BUFFER_MIN = 3
+# ================= CONFIG =================
 
-BOT_MODE = "CONTENT"  # CONTENT or DROPSHIP
+GRAPH_URL = "https://graph.facebook.com/v19.0"
+INSTAGRAM_TOKEN = os.environ.get("INSTAGRAM_ACCESS_TOKEN")
 
-CONTENT_SHEET_ID = "1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY"
-DROPSHIP_SHEET_ID = "1lrn-plbxc7w4wHBLYoCfP_UYIP6EVJbj79IdBUP5sgs"
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
-# ================== SECRETS ==================
+SHEET_URL = os.environ.get("SHEET_CONTENT_URL")
+SHEET_TAB = "Pending_Uploads"
 
-GCP_JSON = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
-IG_ACCESS_TOKEN = os.environ["INSTAGRAM_ACCESS_TOKEN"]
+# Column names (exactly sheet headers)
+COL_BRAND = "Brand_Name"
+COL_PLATFORM = "Platform"
+COL_VIDEO = "Video_Drive_Link"
+COL_CAPTION = "Description"
+COL_STATUS = "Status"
 
-# INSTAGRAM_USER_IDS example:
-# {
-#   "urban glint": "1784...",
-#   "pearl verse": "1784..."
-# }
-IG_USER_IDS_RAW = json.loads(os.environ["INSTAGRAM_USER_IDS"])
+# Instagram brand → user id mapping (existing env)
+RAW_IG_IDS = json.loads(os.environ.get("INSTAGRAM_USER_IDS", "{}"))
 
-# normalize keys once
-IG_USER_IDS = {
-    re.sub(r"[^a-z0-9]", "", k.lower()): v
-    for k, v in IG_USER_IDS_RAW.items()
-}
+# =========================================
 
-# ================== SHEET COLUMN INDEXES ==================
-# Based exactly on your Google Sheet
 
-DATE_COL = 0
-DAY_COL = 1
-TIME_COL = 2
-BRAND_COL = 3          # ✅ Brand Name column
-PLATFORM_COL = 4
-VIDEO_NAME_COL = 5
-VIDEO_URL_COL = 6
-TITLE_COL = 7
-HASHTAG_COL = 8
-DESC_COL = 9
-STATUS_COL = 10
-LIVE_URL_COL = 11
-LOG_COL = 15
+def normalize(text):
+    if not text:
+        return ""
+    return "".join(c.lower() for c in text if c.isalnum())
 
-# ================== GOOGLE SHEET ==================
 
-def connect_sheet():
-    creds = Credentials.from_service_account_info(
-        json.loads(GCP_JSON),
-        scopes=["https://www.googleapis.com/auth/spreadsheets"]
-    )
-    client = gspread.authorize(creds)
+def smart_find_ig_user(brand_text):
+    brand_norm = normalize(brand_text)
 
-    sheet_id = CONTENT_SHEET_ID if BOT_MODE == "CONTENT" else DROPSHIP_SHEET_ID
-    sheet = client.open_by_key(sheet_id).get_worksheet(0)
+    best_match = None
+    best_score = 0
 
-    print("✅ Connected to sheet:", sheet.title)
-    return sheet
+    for brand, ig_id in RAW_IG_IDS.items():
+        score = difflib.SequenceMatcher(
+            None, brand_norm, normalize(brand)
+        ).ratio()
 
-# ================== TIME ==================
+        if score > best_score:
+            best_score = score
+            best_match = ig_id
 
-def parse_time(time_str):
-    try:
-        return datetime.strptime(time_str.strip(), "%I:%M %p").time()
-    except:
-        return None
+    if best_match and best_score >= 0.4:
+        return best_match
 
-# ================== SMART BRAND MATCH ==================
+    raise Exception(f"No confident IG match for brand: {brand_text}")
 
-def smart_find_ig_user_id(brand_name):
-    if not brand_name:
-        return None
 
-    clean = re.sub(r"[^a-z0-9]", "", brand_name.lower())
+# ================= INSTAGRAM CORE =================
 
-    if clean in IG_USER_IDS:
-        return IG_USER_IDS[clean]
-
-    # fuzzy fallback
-    for key in IG_USER_IDS:
-        if key in clean or clean in key:
-            return IG_USER_IDS[key]
-
-    return None
-
-# ================== INSTAGRAM POST ==================
-
-def post_instagram(video_url, caption, brand_name):
-    ig_user_id = smart_find_ig_user_id(brand_name)
-
-    if not ig_user_id:
-        raise Exception(f"No IG account match for brand: {brand_name}")
-
-    # 1️⃣ Create media container
-    create_url = f"https://graph.facebook.com/v19.0/{ig_user_id}/media"
-    create_payload = {
+def ig_create_media(ig_user_id, video_url, caption):
+    url = f"{GRAPH_URL}/{ig_user_id}/media"
+    payload = {
         "media_type": "REELS",
         "video_url": video_url,
         "caption": caption,
-        "access_token": IG_ACCESS_TOKEN
+        "access_token": INSTAGRAM_TOKEN,
     }
+    r = requests.post(url, data=payload)
+    r.raise_for_status()
+    return r.json()["id"]
 
-    r = requests.post(create_url, data=create_payload)
-    if r.status_code != 200:
-        raise Exception(f"Media create failed: {r.text}")
 
-    creation_id = r.json().get("id")
-    time.sleep(5)
+def ig_wait_until_ready(container_id, timeout=300):
+    status_url = f"{GRAPH_URL}/{container_id}"
+    start = time.time()
 
-    # 2️⃣ Publish
-    publish_url = f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish"
-    publish_payload = {
-        "creation_id": creation_id,
-        "access_token": IG_ACCESS_TOKEN
-    }
+    while True:
+        r = requests.get(
+            status_url,
+            params={
+                "fields": "status_code",
+                "access_token": INSTAGRAM_TOKEN,
+            },
+        )
+        r.raise_for_status()
+        status = r.json().get("status_code")
 
-    r2 = requests.post(publish_url, data=publish_payload)
-    if r2.status_code != 200:
-        raise Exception(f"Publish failed: {r2.text}")
+        if status == "FINISHED":
+            return True
 
-    media_id = r2.json().get("id")
-    print("🎉 INSTAGRAM REEL POSTED")
+        if status == "ERROR":
+            raise Exception("Instagram processing failed")
 
-    return f"https://www.instagram.com/p/{media_id}/"
+        if time.time() - start > timeout:
+            raise Exception("Timeout waiting for Instagram processing")
 
-# ================== MAIN ==================
+        time.sleep(10)  # SAFE WAIT
+
+
+def ig_publish(ig_user_id, container_id):
+    url = f"{GRAPH_URL}/{ig_user_id}/media_publish"
+    r = requests.post(
+        url,
+        data={
+            "creation_id": container_id,
+            "access_token": INSTAGRAM_TOKEN,
+        },
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def post_instagram(video_url, caption, brand_name):
+    ig_user_id = smart_find_ig_user(brand_name)
+
+    container_id = ig_create_media(ig_user_id, video_url, caption)
+
+    ig_wait_until_ready(container_id)
+
+    publish_result = ig_publish(ig_user_id, container_id)
+
+    return publish_result.get("id")
+
+
+# ================= GOOGLE SHEET =================
+
+def connect_sheet():
+    creds = Credentials.from_service_account_info(
+        json.loads(os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]),
+        scopes=SCOPES,
+    )
+    client = gspread.authorize(creds)
+    sheet = client.open_by_url(SHEET_URL).worksheet(SHEET_TAB)
+    print(f"✅ Connected to sheet: {SHEET_TAB}")
+    return sheet
+
+
+# ================= MAIN =================
 
 def main():
-    print("🤖 SMART AI BOT STARTED")
-
-    now = datetime.now(IST)
-    today_date = now.date()
-    today_day = now.strftime("%A").lower()
-
     sheet = connect_sheet()
-    rows = sheet.get_all_values()
+    rows = sheet.get_all_records()
 
-    for i in range(1, len(rows)):
-        row = rows[i]
-
+    for idx, row in enumerate(rows, start=2):
         try:
-            if row[STATUS_COL].strip().upper() != "PENDING":
+            if row.get(COL_STATUS, "").upper() == "DONE":
                 continue
 
-            row_date = datetime.strptime(row[DATE_COL], "%m-%d-%Y").date()
-            if row_date != today_date:
+            platform = row.get(COL_PLATFORM, "").lower()
+            if "insta" not in platform:
                 continue
 
-            if row[DAY_COL].lower() != today_day:
-                continue
+            brand = row.get(COL_BRAND)
+            video = row.get(COL_VIDEO)
+            caption = row.get(COL_CAPTION, "")
 
-            row_time = parse_time(row[TIME_COL])
-            if not row_time:
-                continue
+            print(f"🚀 Posting Instagram | Row {idx} | {brand}")
 
-            row_dt = IST.localize(datetime.combine(today_date, row_time))
-            diff = abs((now - row_dt).total_seconds()) / 60
-            if diff > TIME_BUFFER_MIN:
-                continue
+            post_id = post_instagram(video, caption, brand)
 
-            platform = row[PLATFORM_COL].lower().strip()
-            brand_name = row[BRAND_COL].strip()
-            video_url = row[VIDEO_URL_COL].strip()
+            sheet.update_cell(idx, list(row.keys()).index(COL_STATUS) + 1, "DONE")
 
-            title = row[TITLE_COL].strip()
-            desc = row[DESC_COL].strip()
-            tags = row[HASHTAG_COL].strip()
-            caption = f"{title}\n\n{desc}\n\n{tags}"
-
-            if platform == "instagram":
-                live_url = post_instagram(video_url, caption, brand_name)
-
-                sheet.update_cell(i + 1, STATUS_COL + 1, "DONE")
-                sheet.update_cell(i + 1, LIVE_URL_COL + 1, live_url)
-                sheet.update_cell(i + 1, LOG_COL + 1, "INSTAGRAM_POSTED")
-
-                print("✅ TASK COMPLETED")
-                return
+            print(f"✅ Instagram posted successfully: {post_id}")
 
         except Exception as e:
-            sheet.update_cell(i + 1, STATUS_COL + 1, "FAILED")
-            sheet.update_cell(i + 1, LOG_COL + 1, str(e))
-            print("❌ ERROR:", e)
-            return
+            print(f"❌ ERROR Row {idx}: {e}")
+            continue
 
-    print("⏸️ No task to run")
-
-# ================== ENTRY ==================
 
 if __name__ == "__main__":
     main()
