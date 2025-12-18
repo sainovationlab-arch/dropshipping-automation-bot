@@ -1,15 +1,17 @@
 import os
+import json
 import time
 import requests
+import re
 import gspread
-import json
 from google.oauth2.service_account import Credentials
 
-# --- CONFIGURATION ---
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+# ==============================================================================
+# 1. CONFIGURATION & MAPPING
+# ==============================================================================
 
-# Brand Mapping
-BRAND_TOKENS = {
+# Pinterest Brand Mapping (Brand Name -> Secret Key Name)
+BRAND_CONFIG = {
     "Diamond Dice": {"token": "PINTEREST_TOKEN_DIAMOND", "board": "PINTEREST_BOARD_DIAMOND"},
     "Pearl Verse": {"token": "PINTEREST_TOKEN_PEARL", "board": "PINTEREST_BOARD_PEARL"},
     "Luxivibe": {"token": "PINTEREST_TOKEN_LUXIVIBE", "board": "PINTEREST_BOARD_LUXIVIBE"},
@@ -20,158 +22,217 @@ BRAND_TOKENS = {
     "Emerald Edge": {"token": "PINTEREST_TOKEN_EMERALD", "board": "PINTEREST_BOARD_EMERALD"}
 }
 
-def get_google_client():
-    creds_json = os.environ.get('GCP_CREDENTIALS')
+# ==============================================================================
+# 2. HELPER FUNCTIONS
+# ==============================================================================
+
+def get_env_var(keys):
+    """Find secret from environment variables"""
+    for key in keys:
+        val = os.environ.get(key)
+        if val: return val
+    return None
+
+def get_val(row, keys):
+    """Smart Column Reader"""
+    normalized_row = {k.lower().replace(" ", "").replace("_", ""): v for k, v in row.items()}
+    for key in keys:
+        if key in row: return str(row[key]).strip()
+        norm_key = key.lower().replace(" ", "").replace("_", "")
+        if norm_key in normalized_row: return str(normalized_row[norm_key]).strip()
+    return ""
+
+def get_sheet_service():
+    """Connect to Google Sheet"""
+    creds_json = get_env_var(["GCP_CREDENTIALS", "GOOGLE_CREDENTIALS"])
     if not creds_json:
-        raise ValueError("GCP_CREDENTIALS not found!")
-    creds_dict = json.loads(creds_json)
-    creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    return gspread.authorize(creds)
-
-def download_file(url, filename):
-    print(f"⬇️ Downloading video from: {url}")
-    if "drive.google.com" in url and "/view" in url:
-        try:
-            file_id = url.split("/d/")[1].split("/")[0]
-            url = f"https://drive.google.com/uc?export=download&id={file_id}"
-        except:
-            print("❌ Error parsing Drive URL")
-            return False
+        print("❌ FATAL: GCP_CREDENTIALS missing.")
+        return None
     
     try:
-        response = requests.get(url, stream=True)
-        if response.status_code == 200:
-            with open(filename, 'wb') as f:
-                for chunk in response.iter_content(1024):
-                    f.write(chunk)
-            return True
-        else:
-            print(f"❌ Download Failed. Status: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"❌ Download Error: {e}")
-        return False
-
-def upload_video_to_pinterest(access_token, file_path):
-    print("📤 Uploading video to Pinterest Server...")
-    # Clean token (Remove spaces/newlines)
-    access_token = access_token.strip()
-    
-    register_url = "https://api.pinterest.com/v5/media"
-    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-    payload = {"media_type": "video"}
-    
-    try:
-        reg_resp = requests.post(register_url, headers=headers, json=payload)
-        if reg_resp.status_code != 201:
-            print(f"❌ Media Register Failed: {reg_resp.text}")
-            return None
+        creds = Credentials.from_service_account_info(
+            json.loads(creds_json), 
+            scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+        )
+        client = gspread.authorize(creds)
         
-        data = reg_resp.json()
-        media_id = data['media_id']
-        upload_url = data['upload_url']
-        upload_params = data['upload_parameters']
-        
-        with open(file_path, 'rb') as file:
-            files = {'file': file}
-            up_resp = requests.post(upload_url, data=upload_params, files=files)
-            
-        if up_resp.status_code != 204:
-            print("❌ Video File Upload Failed")
+        # Try finding Sheet URL/ID from Secrets
+        sheet_id = get_env_var(["SHEET_CONTENT_URL", "SPREADSHEET_ID", "SHEET_DROPSHIPPING_URL"])
+        if not sheet_id:
+            print("❌ Sheet ID missing in Secrets.")
             return None
 
-        print("⏳ Processing Video (Waiting 10s)...")
-        for _ in range(5):
-            time.sleep(5)
-            check_resp = requests.get(f"{register_url}/{media_id}", headers=headers)
-            status = check_resp.json().get('status')
-            if status == 'succeeded':
-                print("✅ Video Processed!")
-                return media_id
-            elif status == 'failed':
-                print("❌ Video Processing Failed on Pinterest")
-                return None
-        return media_id
+        if "docs.google.com" in sheet_id:
+            return client.open_by_url(sheet_id).sheet1
+        return client.open_by_key(sheet_id).sheet1
     except Exception as e:
-        print(f"❌ Upload Error: {e}")
+        print(f"❌ Connection Error: {e}")
         return None
 
-def create_pin(access_token, board_id, media_id, title, description):
-    # Clean token (Remove spaces/newlines)
-    access_token = access_token.strip()
+def download_video(url, filename):
+    print(f"⬇️ Downloading: {url}")
+    # Drive Link Converter
+    if "drive.google.com" in url:
+        m = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
+        id_val = m.group(1) if m else (re.search(r"id=([a-zA-Z0-9_-]+)", url).group(1) if re.search(r"id=([a-zA-Z0-9_-]+)", url) else None)
+        if id_val: url = f"https://drive.google.com/uc?export=download&confirm=t&id={id_val}"
     
+    try:
+        with requests.get(url, stream=True, timeout=60) as r:
+            r.raise_for_status()
+            with open(filename, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
+        return True
+    except Exception as e:
+        print(f"❌ Download Failed: {e}")
+        return False
+
+# ==============================================================================
+# 3. PINTEREST API FUNCTIONS (v5)
+# ==============================================================================
+
+def upload_video_v5(access_token, file_path):
+    print("📤 Registering Upload with Pinterest...")
+    auth_headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+    
+    # 1. Register
+    try:
+        reg = requests.post("https://api.pinterest.com/v5/media", headers=auth_headers, json={"media_type": "video"})
+        if reg.status_code != 201:
+            print(f"❌ Register Failed: {reg.text}")
+            return None
+        
+        data = reg.json()
+        media_id = data['media_id']
+        upload_url = data['upload_url']
+        params = data['upload_parameters']
+        
+        # 2. Upload File
+        print("📤 Uploading bytes...")
+        with open(file_path, 'rb') as f:
+            up = requests.post(upload_url, data=params, files={'file': f})
+            if up.status_code != 204:
+                print(f"❌ Upload Failed: {up.status_code}")
+                return None
+        
+        # 3. Check Status
+        print("⏳ Processing Video (Waiting 10s)...")
+        for _ in range(6):
+            time.sleep(5)
+            chk = requests.get(f"https://api.pinterest.com/v5/media/{media_id}", headers=auth_headers).json()
+            status = chk.get('status')
+            print(f"   Status: {status}")
+            if status == 'succeeded': return media_id
+            if status == 'failed': return None
+            
+        return media_id # Try anyway if stuck in processing
+        
+    except Exception as e:
+        print(f"❌ API Error: {e}")
+        return None
+
+def create_pin_v5(access_token, board_id, media_id, title, desc, link):
+    print(f"📌 Creating Pin on Board: {board_id}")
     url = "https://api.pinterest.com/v5/pins"
     headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+    
     payload = {
         "board_id": board_id,
         "media_source": {"source_type": "video_id", "media_id": media_id},
-        "title": title,
-        "description": description
+        "title": title[:100],
+        "description": desc[:500],
     }
+    if link and "http" in link: payload["link"] = link
     
-    resp = requests.post(url, headers=headers, json=payload)
-    if resp.status_code == 201:
-        print(f"✅ PIN CREATED: {title}")
+    r = requests.post(url, headers=headers, json=payload)
+    if r.status_code == 201:
+        print(f"✅ PIN SUCCESS! ID: {r.json()['id']}")
         return True
     else:
-        print(f"❌ Pin Failed: {resp.text}")
+        print(f"❌ Pin Failed: {r.text}")
         return False
 
-def run_pinterest_automation():
-    print("🚀 Pinterest Video Automation Started...")
-    client = get_google_client()
-    sheet_url = os.environ.get('SHEET_CONTENT_URL')
-    
-    if not sheet_url:
-        print("❌ Sheet URL missing")
-        return
+# ==============================================================================
+# 4. MAIN RUNNER
+# ==============================================================================
+
+def run_pinterest_bot():
+    print("🚀 Pinterest Bot Started...")
+    sheet = get_sheet_service()
+    if not sheet: return
 
     try:
-        sheet = client.open_by_url(sheet_url).worksheet("Pending_Uploads")
-    except Exception as e:
-        print(f"❌ Error opening sheet: {e}")
-        return
+        all_values = sheet.get_all_values()
+        headers = [str(h).strip() for h in all_values[0]]
+        print(f"📊 Headers: {headers}")
+        
+        # Find Columns
+        def find_col(names):
+            for i, h in enumerate(headers):
+                if h.lower().replace(" ","").replace("_","") in [n.lower().replace(" ","").replace("_","") for n in names]: return i + 1
+            return None
 
-    data = sheet.get_all_records()
-    print(f"📊 Rows found: {len(data)}")
+        status_col = find_col(['Status'])
+        platform_col = find_col(['Platform'])
+        
+        if not status_col or not platform_col:
+            print("❌ Need 'Status' and 'Platform' columns.")
+            return
 
-    for i, row in enumerate(data, start=2):
-        status = str(row.get("Status", "")).strip().lower()
-        platform = str(row.get("Platform", "")).strip().lower()
-        brand = row.get("Account_Name")
-
-        print(f"🔎 Row {i}: Brand='{brand}' | Platform='{platform}' | Status='{status}'")
-
-        if status != "done" and "pinterest" in platform:
-            print(f"🎯 MATCH FOUND: Processing Row {i}")
-            video_url = row.get("Video_URL")
-            caption = row.get("Caption")
-            tags = row.get("Tags")
-            desc = f"{caption}\n\n{tags}"
+        # Process Rows
+        for i, raw_row in enumerate(all_values[1:]):
+            row_num = i + 2
+            row = {headers[k]: v for k, v in enumerate(raw_row) if k < len(headers)}
             
-            brand_config = BRAND_TOKENS.get(brand)
-            if not brand_config:
-                print(f"⚠️ Brand '{brand}' not configured. Skipping.")
-                continue
-
-            video_filename = "temp_video.mp4"
-            if download_file(video_url, video_filename):
-                # Retrieve tokens safely with stripping
-                token = os.environ.get(brand_config['token'], "").strip()
-                board = os.environ.get(brand_config['board'], "").strip()
+            status = get_val(row, ['Status']).upper()
+            platform = get_val(row, ['Platform']).lower()
+            
+            if status == 'PENDING' and 'pinterest' in platform:
+                brand = get_val(row, ['Brand_Name', 'Account_Name', 'Brand'])
+                print(f"\n--- Processing Row {row_num}: {brand} ---")
                 
-                if token and board:
-                    media_id = upload_video_to_pinterest(token, video_filename)
+                # Get Secrets for Brand
+                config = BRAND_CONFIG.get(brand)
+                if not config:
+                    print(f"⚠️ No config found for brand: {brand}")
+                    continue
+                
+                token = os.environ.get(config['token'])
+                board = os.environ.get(config['board'])
+                
+                if not token or not board:
+                    print(f"❌ Missing Secrets for {brand}. Check GitHub Settings.")
+                    continue
+                
+                # Prepare Data
+                video_url = get_val(row, ['Video_URL'])
+                title = get_val(row, ['Title_Hook', 'Title'])
+                desc = get_val(row, ['Description', 'Caption'])
+                tags = get_val(row, ['Caption_Hashtags', 'Tags'])
+                link = get_val(row, ['Link', 'Product_Link']) # Link to product or YouTube
+                
+                full_desc = f"{desc}\n\n{tags}"
+                
+                # Execute
+                sheet.update_cell(row_num, status_col, 'PROCESSING')
+                
+                temp_file = "temp_pin.mp4"
+                if download_video(video_url, temp_file):
+                    media_id = upload_video_v5(token, temp_file)
                     if media_id:
-                        if create_pin(token, board, media_id, caption, desc):
-                            sheet.update_cell(i, 8, "Done") # Update status
-                            print(f"✅ Row {i} Done!")
+                        if create_pin_v5(token, board, media_id, title, full_desc, link):
+                            sheet.update_cell(row_num, status_col, 'DONE')
+                        else:
+                            sheet.update_cell(row_num, status_col, 'FAIL_PIN')
+                    else:
+                        sheet.update_cell(row_num, status_col, 'FAIL_UPLOAD')
+                    
+                    if os.path.exists(temp_file): os.remove(temp_file)
                 else:
-                    print(f"❌ Missing Secrets for {brand}")
-            
-            if os.path.exists(video_filename):
-                os.remove(video_filename)
-            print("--------------------------------")
+                    sheet.update_cell(row_num, status_col, 'FAIL_DL')
+
+    except Exception as e:
+        print(f"❌ System Error: {e}")
 
 if __name__ == "__main__":
-    run_pinterest_automation()
+    run_pinterest_bot()
