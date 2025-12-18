@@ -5,7 +5,8 @@ import random
 import requests
 import re
 import gspread
-from google.oauth2.service_account import Credentials
+from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+from google.oauth2.credentials import Credentials as UserCredentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
@@ -19,12 +20,14 @@ def get_env_var(keys, default=None):
         if val: return val
     return default
 
+# Secrets
 GCP_CREDENTIALS_JSON = get_env_var(["GCP_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS_JSON", "GOOGLE_CREDENTIALS"])
 SPREADSHEET_ID = get_env_var(["SPREADSHEET_ID", "SHEET_CONTENT_URL", "SHEET_DROPSHIPPING_URL"])
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 PINTEREST_SESSION = os.environ.get("PINTEREST_SESSION")
 PINTEREST_BOARD_ID = os.environ.get("PINTEREST_BOARD_ID")
 
+# Instagram IDs
 INSTAGRAM_IDS = {
     "Emerald Edge": "17841478369307404", "Urban Glint": "17841479492205083",
     "Diamond Dice": "17841478369307404", "Grand Orbit": "17841479516066757",
@@ -33,6 +36,7 @@ INSTAGRAM_IDS = {
     "Luxivibe": "17841479492205083"
 }
 
+# YouTube Token Map
 YOUTUBE_PROJECT_MAP = {
     "Pearl Verse": os.environ.get("YT_PEARL_VERSE"), "Opus Elite": os.environ.get("YT_OPUS_ELITE"),
     "Diamond Dice": os.environ.get("YT_DIAMOND_DICE"), "Emerald Edge": os.environ.get("YT_EMERALD_EDGE"),
@@ -44,19 +48,13 @@ YOUTUBE_PROJECT_MAP = {
 # 2. HELPER FUNCTIONS
 # ==============================================================================
 
-# --- Smart Column Reader ---
 def get_val(row, keys):
-    """Try multiple column names to find data"""
-    # Normalize row keys (lowercase, remove spaces)
+    """Smart Column Reader"""
     normalized_row = {k.lower().replace(" ", "").replace("_", ""): v for k, v in row.items()}
-    
     for key in keys:
-        # 1. Try exact match
         if key in row: return str(row[key]).strip()
-        # 2. Try normalized match
         norm_key = key.lower().replace(" ", "").replace("_", "")
         if norm_key in normalized_row: return str(normalized_row[norm_key]).strip()
-        
     return ""
 
 def get_sheet_service():
@@ -64,7 +62,10 @@ def get_sheet_service():
         print("❌ FATAL: GCP_CREDENTIALS missing.")
         return None
     try:
-        creds = Credentials.from_service_account_info(json.loads(GCP_CREDENTIALS_JSON), scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'])
+        creds = ServiceAccountCredentials.from_service_account_info(
+            json.loads(GCP_CREDENTIALS_JSON), 
+            scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+        )
         client = gspread.authorize(creds)
         if "docs.google.com" in SPREADSHEET_ID: return client.open_by_url(SPREADSHEET_ID).sheet1
         return client.open_by_key(SPREADSHEET_ID).sheet1
@@ -74,7 +75,6 @@ def get_sheet_service():
 
 def download_video_locally(url):
     print(f"⬇️ Downloading video...")
-    # Clean Google Drive Links
     if "drive.google.com" in url:
         m = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
         id_val = m.group(1) if m else (re.search(r"id=([a-zA-Z0-9_-]+)", url).group(1) if re.search(r"id=([a-zA-Z0-9_-]+)", url) else None)
@@ -108,24 +108,23 @@ def safe_update_cell(sheet, row, col, value):
 # ==============================================================================
 
 def instagram_post(row, row_num):
-    # Use Smart Reader: Try 'Account_Name', 'Account Name', 'Brand'
     account = get_val(row, ['Account_Name', 'Account Name', 'Brand', 'AccountName'])
-    
     if not account:
-        print(f"⚠️ No Account Name found in row {row_num}. Check column header.")
+        print(f"⚠️ Row {row_num}: No Account Name found.")
         return None
 
     page_id = INSTAGRAM_IDS.get(account)
     if not page_id: 
-        print(f"⚠️ No Instagram ID matched for '{account}'. Check spelling in code vs sheet.")
+        print(f"⚠️ Row {row_num}: No ID for '{account}'")
         return None
     
-    video_url = get_val(row, ['Video_URL', 'Video URL', 'Video Link'])
+    video_url = get_val(row, ['Video_URL', 'Video URL'])
     caption = get_val(row, ['Caption', 'Title'])
     tags = get_val(row, ['Tags', 'Hashtags'])
     
     local = download_video_locally(video_url)
     if not local: return None
+    
     catbox = upload_to_catbox(local)
     if os.path.exists(local): os.remove(local)
     if not catbox: return None
@@ -157,14 +156,104 @@ def youtube_post(row, row_num):
     if not local: return None
     
     try:
-        creds = Credentials.from_authorized_user_info(json.loads(token))
+        # Use UserCredentials for YouTube
+        creds = UserCredentials.from_authorized_user_info(json.loads(token))
         youtube = build('youtube', 'v3', credentials=creds)
         
         caption = get_val(row, ['Caption', 'Title'])
         tags = get_val(row, ['Tags', 'Hashtags'])
         
-        body = {'snippet': {'title': caption[:100], 'description': f"{caption}\n{tags}", 'tags': tags.split(','), 'categoryId': '22'}, 'status': {'privacyStatus': 'public'}}
+        body = {
+            'snippet': {
+                'title': caption[:100], 
+                'description': f"{caption}\n{tags}", 
+                'tags': tags.split(','), 
+                'categoryId': '22'
+            }, 
+            'status': {
+                'privacyStatus': 'public'
+            }
+        }
+        
         media = MediaFileUpload(local, chunksize=-1, resumable=True)
         req = youtube.videos().insert(part=','.join(body.keys()), body=body, media_body=media)
+        
         resp = None
-        while
+        while resp is None:
+            status, resp = req.next_chunk()
+            if status:
+                print(f"Uploading... {int(status.progress() * 100)}%")
+        
+        if os.path.exists(local): os.remove(local)
+        return f"https://youtu.be/{resp['id']}"
+    except Exception as e: 
+        print(f"❌ YT Error: {e}")
+        if os.path.exists(local): os.remove(local)
+        return None
+
+# ==============================================================================
+# 4. MAIN ENGINE
+# ==============================================================================
+
+def run_master_automation():
+    sheet = get_sheet_service()
+    if not sheet: return
+
+    try:
+        all_values = sheet.get_all_values()
+        if not all_values: return
+            
+        headers = [str(h).strip() for h in all_values[0]]
+        print(f"📊 Sheet Headers: {headers}")
+
+        def find_col(possible_names):
+            for i, h in enumerate(headers):
+                if h.lower().replace(" ","").replace("_","") in [p.lower().replace(" ","").replace("_","") for p in possible_names]:
+                    return i + 1
+            return None
+
+        status_col = find_col(['Status', 'State'])
+        link_col = find_col(['Link', 'Live Link', 'URL'])
+        platform_col = find_col(['Platform', 'Social Media'])
+        
+        if not status_col or not platform_col:
+            print(f"❌ CRITICAL: Need 'Status' and 'Platform' columns. Found: {headers}")
+            return
+
+        data = []
+        for row in all_values[1:]:
+            item = {}
+            for i, val in enumerate(row):
+                if i < len(headers): item[headers[i]] = val
+            data.append(item)
+
+    except Exception as e:
+        print(f"❌ Read Error: {e}")
+        return
+
+    print(f"🚀 Started. Rows: {len(data)}")
+
+    for i, row in enumerate(data):
+        row_num = i + 2 
+        
+        status = get_val(row, ['Status']).upper()
+        platform = get_val(row, ['Platform']).lower()
+
+        if status == 'PENDING' and platform:
+            print(f"\n--- Processing Row {row_num}: {platform} ---")
+            safe_update_cell(sheet, row_num, status_col, 'PROCESSING')
+            
+            result = None
+            if 'instagram' in platform: result = instagram_post(row, row_num)
+            elif 'youtube' in platform: result = youtube_post(row, row_num)
+            
+            if result:
+                safe_update_cell(sheet, row_num, status_col, 'DONE')
+                if link_col and "http" in str(result): safe_update_cell(sheet, row_num, link_col, str(result))
+                print(f"✅ Row {row_num} DONE.")
+            else:
+                safe_update_cell(sheet, row_num, status_col, 'FAIL')
+                print(f"❌ Row {row_num} FAILED.")
+
+if __name__ == "__main__":
+    run_master_automation()
