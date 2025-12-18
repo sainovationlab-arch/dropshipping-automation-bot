@@ -7,7 +7,6 @@ import os
 import json
 import time
 import requests
-import tempfile
 import re
 import difflib
 from datetime import datetime
@@ -55,75 +54,16 @@ def is_google_drive_link(url: str):
     return "drive.google.com" in url
 
 def drive_direct_download(url: str):
+    # Convert View Link to Direct Download Link
+    # This works best for files < 100MB
     m = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
     if m:
         fid = m.group(1)
-        return f"https://drive.google.com/uc?export=download&confirm=t&id={fid}"
+        return f"https://drive.google.com/uc?export=download&id={fid}"
     m2 = re.search(r"id=([a-zA-Z0-9_-]+)", url)
     if m2:
-        return f"https://drive.google.com/uc?export=download&confirm=t&id={m2.group(1)}"
+        return f"https://drive.google.com/uc?export=download&id={m2.group(1)}"
     return url
-
-def download_to_temp(url: str, max_mb=300):
-    print(f"⬇ Downloading from: {url}")
-    tmpf = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-    total = 0
-    try:
-        with requests.get(url, stream=True, timeout=HTTP_TIMEOUT) as r:
-            r.raise_for_status()
-            for chunk in r.iter_content(chunk_size=1024 * 1024):
-                if not chunk: break
-                tmpf.write(chunk)
-                total += len(chunk)
-                if total > max_mb * 1024 * 1024:
-                    tmpf.close()
-                    raise Exception("File too large")
-        tmpf.close()
-        
-        file_size = os.path.getsize(tmpf.name)
-        if file_size < 10000:
-            with open(tmpf.name, 'r', errors='ignore') as f:
-                content = f.read(200)
-            raise Exception(f"Download failed (File too small). Content sample: {content}")
-            
-        print(f"✅ Downloaded locally ({round(file_size/1024/1024, 2)} MB)")
-        return tmpf.name
-    except Exception as e:
-        if os.path.exists(tmpf.name):
-            os.remove(tmpf.name)
-        raise e
-
-# --- NEW: MULTI-HOST UPLOADER ---
-def upload_to_temp_host(local_path):
-    print("⬆ Uploading to temp host...")
-    
-    # Try 1: 0x0.st (Reliable)
-    try:
-        print("🔄 Trying Host 1 (0x0.st)...")
-        with open(local_path, "rb") as f:
-            r = requests.post("https://0x0.st", files={"file": f}, timeout=300)
-            if r.status_code < 400:
-                public_url = r.text.strip()
-                print(f"🌍 Public Link (0x0.st): {public_url}")
-                return public_url
-    except Exception as e:
-        print(f"⚠️ 0x0.st failed: {e}")
-
-    # Try 2: file.io (Backup)
-    try:
-        print("🔄 Trying Host 2 (file.io)...")
-        with open(local_path, "rb") as f:
-            r = requests.post("https://file.io", files={"file": f}, timeout=300)
-            if r.status_code < 400:
-                data = r.json()
-                if data.get("success"):
-                    public_url = data.get("link")
-                    print(f"🌍 Public Link (file.io): {public_url}")
-                    return public_url
-    except Exception as e:
-        print(f"⚠️ file.io failed: {e}")
-
-    raise Exception("❌ All backup servers failed. Check internet/file.")
 
 # ------------- Google Sheet connect -------------
 def connect_sheet():
@@ -142,6 +82,7 @@ def connect_sheet():
 
 # ------------- Instagram Helpers -------------
 def ig_create_container(ig_user_id, video_url, caption):
+    print(f"📡 Sending URL to Instagram: {video_url}")
     url = f"{GRAPH_URL}/{ig_user_id}/media"
     payload = {
         "media_type": "REELS",
@@ -150,18 +91,22 @@ def ig_create_container(ig_user_id, video_url, caption):
         "access_token": INSTAGRAM_TOKEN
     }
     r = requests.post(url, data=payload, timeout=HTTP_TIMEOUT)
-    try:
-        r.raise_for_status()
-    except:
-        print(f"❌ Creation Failed: {r.text}")
-        raise
+    
+    # Catching common errors
+    if r.status_code != 200:
+        print(f"❌ Instagram Refused: {r.text}")
+        if "video_url" in r.text:
+             raise Exception("Instagram couldn't download from Drive directly. Ensure Link is 'Anyone with link'")
+        raise Exception(f"IG Create Error: {r.text}")
+        
     return r.json().get("id")
 
 def ig_check_status(container_id):
     url = f"{GRAPH_URL}/{container_id}"
-    r = requests.get(url, params={"fields": "status_code", "access_token": INSTAGRAM_TOKEN}, timeout=HTTP_TIMEOUT)
+    r = requests.get(url, params={"fields": "status_code,status", "access_token": INSTAGRAM_TOKEN}, timeout=HTTP_TIMEOUT)
     r.raise_for_status()
-    return r.json().get("status_code")
+    data = r.json()
+    return data.get("status_code") or data.get("status")
 
 def ig_publish(ig_user_id, creation_id):
     url = f"{GRAPH_URL}/{ig_user_id}/media_publish"
@@ -174,23 +119,6 @@ def ig_publish(ig_user_id, creation_id):
     return r.json().get("id")
 
 # ------------- Main posting flow -------------
-def ensure_public_video(url):
-    # Always force download to temp and re-upload to a public host
-    if is_google_drive_link(url):
-        url = drive_direct_download(url)
-
-    # Download locally
-    local = download_to_temp(url)
-    try:
-        # Upload to public server (New Function)
-        public_url = upload_to_temp_host(local)
-        return public_url
-    finally:
-        try:
-            os.remove(local)
-        except:
-            pass
-
 def post_video_to_ig(brand_name, video_url, caption, sheet, row_index):
     # Mapping logic
     ig_user_id = None
@@ -207,8 +135,12 @@ def post_video_to_ig(brand_name, video_url, caption, sheet, row_index):
 
     print(f"🎯 Posting to Brand: {brand_name} (ID: {ig_user_id})")
 
-    # Get a fresh public link
-    public_url = ensure_public_video(video_url)
+    # DIRECT LINK LOGIC (No Re-upload)
+    if is_google_drive_link(video_url):
+        public_url = drive_direct_download(video_url)
+        print("🔗 Converted to Direct Drive Link")
+    else:
+        public_url = video_url
 
     # Create container
     creation_id = ig_create_container(ig_user_id, public_url, caption)
@@ -223,7 +155,7 @@ def post_video_to_ig(brand_name, video_url, caption, sheet, row_index):
         if status == "FINISHED":
             break
         if status == "ERROR":
-            raise Exception("Instagram rejected the video file (Encoding or Format issue)")
+            raise Exception("Instagram Failed to Process Video (Drive Link Rejected or Format Issue)")
         time.sleep(IG_POLL_INTERVAL)
     else:
         raise Exception("Instagram processing timeout")
@@ -234,13 +166,11 @@ def post_video_to_ig(brand_name, video_url, caption, sheet, row_index):
 
 # ------------- Runner -------------
 def main():
-    print("🤖 MASTER BOT FINAL RUN (MULTI-HOST BACKUP VERSION)")
+    print("🤖 MASTER BOT FINAL RUN (DIRECT DRIVE VERSION)")
     sheet = connect_sheet()
     rows = sheet.get_all_values()
     
     now = datetime.now(IST)
-    today = now.date()
-    
     print(f"📅 System Time: {now}")
 
     for i in range(1, len(rows)):
