@@ -31,6 +31,15 @@ jobs:
           SHEET_CONTENT_URL: ${{ secrets.SHEET_CONTENT_URL }}
           SHEET_DROPSHIPPING_URL: ${{ secrets.SHEET_DROPSHIPPING_URL }}
 
+          - name: Run Master Bot
+  env:
+    INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+    INSTAGRAM_USER_IDS: ${{ secrets.INSTAGRAM_USER_IDS }}
+    GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+    FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
+  run: python master_bot_final.py
+
+
           # ===== META / INSTAGRAM =====
           FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
 
