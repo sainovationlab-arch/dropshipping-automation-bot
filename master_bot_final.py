@@ -17,7 +17,7 @@ from google.oauth2.service_account import Credentials
 
 # ------------- CONFIG -------------
 IST = pytz.timezone("Asia/Kolkata")
-TIME_BUFFER_MIN = 30  # Increased tolerance to 30 mins
+TIME_BUFFER_MIN = 30
 GRAPH_URL = "https://graph.facebook.com/v19.0"
 
 # Secrets / env
@@ -25,9 +25,6 @@ GCP_JSON = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 INSTAGRAM_TOKEN = os.environ.get("INSTAGRAM_ACCESS_TOKEN")
 RAW_IG_MAP = json.loads(os.environ.get("INSTAGRAM_USER_IDS", "{}"))
 SHEET_ID = os.environ.get("SHEET_CONTENT_URL") 
-
-# transfer.sh fallback (no auth)
-TRANSFER_SH_BASE = "https://transfer.sh"
 
 # Sheet columns
 DATE_COL = 0
@@ -45,7 +42,7 @@ LIVE_URL_COL = 11
 LOG_COL = 15
 
 # Behavior tuning
-MAX_IG_PROCESS_WAIT_SEC = 300  # Increased wait time to 5 mins
+MAX_IG_PROCESS_WAIT_SEC = 300
 IG_POLL_INTERVAL = 10 
 HTTP_TIMEOUT = 60 
 
@@ -54,24 +51,10 @@ def normalize_text(s: str) -> str:
     if not s: return ""
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
-def fuzzy_find_ig(brand_name: str, threshold=0.35):
-    target = normalize_text(brand_name)
-    best = None
-    best_score = 0.0
-    for k, v in RAW_IG_MAP.items():
-        score = difflib.SequenceMatcher(None, target, normalize_text(k)).ratio()
-        if score > best_score:
-            best_score = score
-            best = v
-    if best_score >= threshold:
-        return best
-    return None
-
 def is_google_drive_link(url: str):
     return "drive.google.com" in url
 
 def drive_direct_download(url: str):
-    # Added confirm=t to bypass large file warnings
     m = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
     if m:
         fid = m.group(1)
@@ -97,9 +80,8 @@ def download_to_temp(url: str, max_mb=300):
                     raise Exception("File too large")
         tmpf.close()
         
-        # Validation: Check if file is too small (likely HTML error page)
         file_size = os.path.getsize(tmpf.name)
-        if file_size < 10000: # Less than 10KB
+        if file_size < 10000:
             with open(tmpf.name, 'r', errors='ignore') as f:
                 content = f.read(200)
             raise Exception(f"Download failed (File too small). Content sample: {content}")
@@ -111,15 +93,37 @@ def download_to_temp(url: str, max_mb=300):
             os.remove(tmpf.name)
         raise e
 
-def upload_transfer_sh(local_path):
-    print("⬆ Uploading to transfer.sh for Instagram access...")
-    filename = os.path.basename(local_path)
-    with open(local_path, "rb") as f:
-        r = requests.put(f"{TRANSFER_SH_BASE}/{filename}", data=f, timeout=300)
-        r.raise_for_status()
-        public_url = r.text.strip()
-        print(f"🌍 Public Link Generated: {public_url}")
-        return public_url
+# --- NEW: MULTI-HOST UPLOADER ---
+def upload_to_temp_host(local_path):
+    print("⬆ Uploading to temp host...")
+    
+    # Try 1: 0x0.st (Reliable)
+    try:
+        print("🔄 Trying Host 1 (0x0.st)...")
+        with open(local_path, "rb") as f:
+            r = requests.post("https://0x0.st", files={"file": f}, timeout=300)
+            if r.status_code < 400:
+                public_url = r.text.strip()
+                print(f"🌍 Public Link (0x0.st): {public_url}")
+                return public_url
+    except Exception as e:
+        print(f"⚠️ 0x0.st failed: {e}")
+
+    # Try 2: file.io (Backup)
+    try:
+        print("🔄 Trying Host 2 (file.io)...")
+        with open(local_path, "rb") as f:
+            r = requests.post("https://file.io", files={"file": f}, timeout=300)
+            if r.status_code < 400:
+                data = r.json()
+                if data.get("success"):
+                    public_url = data.get("link")
+                    print(f"🌍 Public Link (file.io): {public_url}")
+                    return public_url
+    except Exception as e:
+        print(f"⚠️ file.io failed: {e}")
+
+    raise Exception("❌ All backup servers failed. Check internet/file.")
 
 # ------------- Google Sheet connect -------------
 def connect_sheet():
@@ -171,16 +175,15 @@ def ig_publish(ig_user_id, creation_id):
 
 # ------------- Main posting flow -------------
 def ensure_public_video(url):
-    # Always force download to temp and re-upload to transfer.sh
-    # This ensures Google Drive cookie issues don't break Instagram
+    # Always force download to temp and re-upload to a public host
     if is_google_drive_link(url):
         url = drive_direct_download(url)
 
     # Download locally
     local = download_to_temp(url)
     try:
-        # Upload to public server
-        public_url = upload_transfer_sh(local)
+        # Upload to public server (New Function)
+        public_url = upload_to_temp_host(local)
         return public_url
     finally:
         try:
@@ -231,33 +234,28 @@ def post_video_to_ig(brand_name, video_url, caption, sheet, row_index):
 
 # ------------- Runner -------------
 def main():
-    print("🤖 MASTER BOT FINAL RUN (GUJARATI FIX VERSION)")
+    print("🤖 MASTER BOT FINAL RUN (MULTI-HOST BACKUP VERSION)")
     sheet = connect_sheet()
     rows = sheet.get_all_values()
     
-    # Time Config
     now = datetime.now(IST)
     today = now.date()
-    day_name = now.strftime("%A").lower()
     
-    print(f"📅 System Time: {now} | Day: {day_name}")
+    print(f"📅 System Time: {now}")
 
     for i in range(1, len(rows)):
         row = rows[i]
         try:
-            # Check Status
             if len(row) <= STATUS_COL: continue
             status = (row[STATUS_COL] or "").strip().upper()
             
             if status != "PENDING":
                 continue
 
-            # Check Platform
             platform = (row[PLATFORM_COL] or "").strip().lower()
             if "insta" not in platform:
                 continue
                 
-            # Basic Data
             brand = row[BRAND_COL]
             video_url = row[VIDEO_URL_COL]
             title = row[TITLE_COL]
@@ -277,14 +275,13 @@ def main():
             sheet.update_cell(i+1, LOG_COL+1, "SUCCESS_IG")
             print(f"✅ SUCCESS! Link: {public_live}")
             
-            # Stop after 1 successful post to prevent overload (remove return if you want all at once)
             return 
 
         except Exception as e:
             print(f"❌ ERROR row {i+1}: {str(e)}")
             sheet.update_cell(i+1, STATUS_COL+1, "FAILED")
             sheet.update_cell(i+1, LOG_COL+1, str(e))
-            return # Stop on error to debug
+            return 
 
     print("💤 No tasks found.")
 
