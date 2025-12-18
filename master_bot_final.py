@@ -8,19 +8,36 @@ import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from tenacity import retry, stop_after_attempt, wait_fixed
 
 # ==============================================================================
-# 1. CONFIGURATION & SECRETS SETUP
+# 1. SMART CONFIGURATION (Auto-Detect Secrets)
 # ==============================================================================
 
-# General Secrets
-# ડ્રોપશિપિંગ અને કન્ટેન્ટ બંને શીટ માટે અલગ ID વાપરી શકાય, પણ અત્યારે મેઈન શીટ લઈએ.
-SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID") 
-GCP_CREDENTIALS_JSON = os.environ.get("GCP_CREDENTIALS")
+def get_env_var(keys, default=None):
+    """અલગ અલગ નામથી વેરીએબલ શોધે છે (Fallback Logic)"""
+    for key in keys:
+        val = os.environ.get(key)
+        if val:
+            return val
+    return default
+
+# Google Credentials (Try multiple names)
+GCP_CREDENTIALS_JSON = get_env_var([
+    "GCP_CREDENTIALS", 
+    "GOOGLE_APPLICATION_CREDENTIALS_JSON", 
+    "GOOGLE_CREDENTIALS",
+    "GOOGLE_SHEETS_CREDENTIALS"
+])
+
+# Sheet ID (Try ID or URL keys)
+SPREADSHEET_ID = get_env_var([
+    "SPREADSHEET_ID", 
+    "SHEET_CONTENT_URL", 
+    "SHEET_DROPSHIPPING_URL"
+])
+
+# Tokens
 FB_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
-
-# Pinterest Secrets
 PINTEREST_SESSION = os.environ.get("PINTEREST_SESSION")
 PINTEREST_BOARD_ID = os.environ.get("PINTEREST_BOARD_ID")
 
@@ -50,28 +67,41 @@ YOUTUBE_PROJECT_MAP = {
 }
 
 # ==============================================================================
-# 2. HELPER FUNCTIONS (Robust Download & Catbox)
+# 2. HELPER FUNCTIONS
 # ==============================================================================
 
 def get_sheet_service():
+    if not GCP_CREDENTIALS_JSON:
+        print("❌ FATAL ERROR: GCP_CREDENTIALS secret is MISSING in GitHub Settings!")
+        print("💡 Solution: Go to Settings > Secrets > Actions > New Repository Secret")
+        print("   Name: GCP_CREDENTIALS")
+        print("   Value: Paste your entire JSON key content here.")
+        return None
+
     try:
-        if not GCP_CREDENTIALS_JSON:
-            print("❌ FATAL: GCP_CREDENTIALS secret is missing!")
-            return None
         creds_dict = json.loads(GCP_CREDENTIALS_JSON)
         creds = Credentials.from_service_account_info(
             creds_dict,
             scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
         )
         client = gspread.authorize(creds)
-        # SPREADSHEET_ID environment variable માં હોવું જરૂરી છે
-        return client.open_by_key(SPREADSHEET_ID).sheet1
+        
+        # Handle Full URL or ID
+        sheet_key = SPREADSHEET_ID
+        if not sheet_key:
+             print("❌ FATAL: SPREADSHEET_ID is missing in Secrets!")
+             return None
+             
+        if "docs.google.com" in sheet_key:
+            return client.open_by_url(sheet_key).sheet1
+        else:
+            return client.open_by_key(sheet_key).sheet1
+            
     except Exception as e:
-        print(f"❌ Sheet Connection Error: {e}")
+        print(f"❌ Connection Error: {e}")
         return None
 
 def drive_direct_download(url):
-    """Google Drive Link ને ડાયરેક્ટ ડાઉનલોડ લિંકમાં ફેરવે છે"""
     m = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
     if m:
         return f"https://drive.google.com/uc?export=download&confirm=t&id={m.group(1)}"
@@ -81,7 +111,6 @@ def drive_direct_download(url):
     return url
 
 def download_video_locally(url):
-    """વિડીયો લોકલ ડાઉનલોડ કરે છે (YouTube માટે જરૂરી)"""
     print(f"⬇️ Downloading video...")
     if "drive.google.com" in url:
         url = drive_direct_download(url)
@@ -99,7 +128,6 @@ def download_video_locally(url):
         return None
 
 def upload_to_catbox(local_path):
-    """Instagram માટે Catbox પર અપલોડ કરે છે (Best for Reels)"""
     print("🐱 Uploading to Catbox (Insta Helper)...")
     url = "https://catbox.moe/user/api.php"
     try:
@@ -126,7 +154,7 @@ def safe_update_cell(sheet, row, col, value):
 # 3. PLATFORM POSTING FUNCTIONS
 # ==============================================================================
 
-# --- INSTAGRAM (Updated with Catbox Logic) ---
+# --- INSTAGRAM ---
 def instagram_post(row, row_num):
     account_name = str(row.get('Account_Name', '')).strip()
     page_id = INSTAGRAM_IDS.get(account_name)
@@ -140,25 +168,22 @@ def instagram_post(row, row_num):
     tags = row.get('Tags', '')
     final_caption = f"{caption}\n\n{tags}"
 
-    # 1. Download Locally
     local_file = download_video_locally(video_url)
     if not local_file: return None
 
-    # 2. Upload to Catbox for reliable URL
     catbox_url = upload_to_catbox(local_file)
-    if os.path.exists(local_file): os.remove(local_file) # Clean up local
+    if os.path.exists(local_file): os.remove(local_file) 
     
     if not catbox_url: return None
 
     print(f"📸 Posting to Instagram: {account_name}...")
 
     try:
-        # 3. Create Container
         url = f"https://graph.facebook.com/v19.0/{page_id}/media"
         params = {
             'access_token': FB_ACCESS_TOKEN,
             'media_type': 'REELS',
-            'video_url': catbox_url, # Using Catbox URL
+            'video_url': catbox_url,
             'caption': final_caption
         }
         res = requests.post(url, params=params).json()
@@ -171,7 +196,6 @@ def instagram_post(row, row_num):
         print(f"⏳ Processing Instagram (Waiting 30s)...")
         time.sleep(30)
         
-        # 4. Publish
         pub_url = f"https://graph.facebook.com/v19.0/{page_id}/media_publish"
         pub_params = {'creation_id': creation_id, 'access_token': FB_ACCESS_TOKEN}
         pub_res = requests.post(pub_url, params=pub_params).json()
@@ -190,11 +214,10 @@ def instagram_post(row, row_num):
 # --- YOUTUBE ---
 def youtube_post(row, row_num):
     account_name = str(row.get('Account_Name', '')).strip()
-    clean_name = str(account_name).strip()
-    token_json = YOUTUBE_PROJECT_MAP.get(clean_name)
+    token_json = YOUTUBE_PROJECT_MAP.get(account_name)
     
     if not token_json:
-        print(f"❌ No YouTube Token found for '{clean_name}'")
+        print(f"❌ No YouTube Token found for '{account_name}'")
         return None
 
     video_url = row.get('Video_URL')
@@ -233,19 +256,18 @@ def youtube_post(row, row_num):
 
 # --- PINTEREST ---
 def pinterest_post(row, row_num):
-    # Pinterest Logic retained from your file
     if not PINTEREST_SESSION or not PINTEREST_BOARD_ID:
         print("⚠️ Pinterest Secrets Missing")
         return None
     
     link_to_pin = str(row.get('Link', '')).strip()
     if not link_to_pin:
-        print("⚠️ Pinterest needs a Link column value (e.g. YouTube Link)")
+        print("⚠️ Pinterest needs a Link")
         return None
 
     print(f"📌 Pinning to Pinterest...")
     caption = row.get('Caption', 'Check this out!')
-    image_url = "https://i.pinimg.com/736x/16/09/27/160927643666b69d9c2409748684497e.jpg" # Placeholder
+    image_url = "https://i.pinimg.com/736x/16/09/27/160927643666b69d9c2409748684497e.jpg" 
 
     session = requests.Session()
     session.cookies.set("_pinterest_sess", PINTEREST_SESSION)
@@ -295,10 +317,9 @@ def run_master_automation():
             return
             
         headers = sheet.row_values(1)
-        # Find column indexes (1-based)
         try:
             status_col_idx = headers.index('Status') + 1
-            link_col_idx = headers.index('Link') + 1 # For pasting final link
+            link_col_idx = headers.index('Link') + 1 
         except ValueError:
             print("❌ Error: 'Status' or 'Link' column missing in headers.")
             return
@@ -328,7 +349,6 @@ def run_master_automation():
             elif 'pinterest' in platform:
                 result_link = pinterest_post(row, row_num)
             
-            # --- UPDATE SHEET ---
             if result_link:
                 safe_update_cell(sheet, row_num, status_col_idx, 'DONE')
                 if "http" in str(result_link):
