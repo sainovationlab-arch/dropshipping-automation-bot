@@ -3,7 +3,7 @@ import time
 import json
 import requests
 import gspread
-import gdown  # New Library for Drive
+import gdown  
 from google.oauth2.service_account import Credentials
 
 # =======================================================
@@ -13,7 +13,7 @@ from google.oauth2.service_account import Credentials
 # 1. AUTH TOKEN
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 2. BRAND DATABASE (તમારા GitHub ફાઈલ મુજબ)
+# 2. BRAND DATABASE
 BRAND_CONFIG = {
     "PEARL VERSE": { "ig_id": "17841478822408000" },
     "DIAMOND DICE": { "ig_id": "17841478369307404" },
@@ -55,7 +55,7 @@ def get_sheet_connection():
     return None
 
 # =======================================================
-# 🔧 SMART UPLOAD FUNCTIONS (THE FIX)
+# 🔧 SMART UPLOAD FUNCTIONS (HEADER FIX APPLIED)
 # =======================================================
 
 def download_video_locally(drive_url):
@@ -63,12 +63,10 @@ def download_video_locally(drive_url):
     print("      ⬇️ Downloading video locally to bypass Google block...")
     temp_filename = "temp_upload_video.mp4"
     
-    # Remove existing file if any
     if os.path.exists(temp_filename):
         os.remove(temp_filename)
 
     try:
-        # gdown is powerful for Drive Links
         output = gdown.download(drive_url, temp_filename, quiet=False, fuzzy=True)
         
         if output and os.path.exists(temp_filename):
@@ -84,8 +82,7 @@ def download_video_locally(drive_url):
 
 def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
     """
-    Uploads the LOCAL file to Instagram using Resumable Upload Protocol.
-    This solves the 'robots.txt' / '403 Forbidden' error.
+    FIXED: Uses correct headers ('offset' instead of 'file_offset')
     """
     print(f"      📸 Instagram Resumable Upload ({brand_name})...")
     
@@ -117,12 +114,12 @@ def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
             
         print(f"      🔹 Session Created. ID: {container_id}")
 
-        # STEP 2: UPLOAD THE FILE BYTES
+        # STEP 2: UPLOAD THE FILE BYTES (HEADER FIX HERE)
         file_size = os.path.getsize(file_path)
         with open(file_path, "rb") as f:
             headers = {
                 "Authorization": f"OAuth {IG_ACCESS_TOKEN}",
-                "file_offset": "0",
+                "offset": "0",              # <--- SUNDAYO: 'file_offset' hatu te 'offset' karyu
                 "file_size": str(file_size)
             }
             print("      🔹 Uploading bytes to Instagram...")
@@ -134,7 +131,7 @@ def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
 
         # STEP 3: PUBLISH THE CONTAINER
         print("      ⏳ Waiting for Media Processing (60s)...")
-        time.sleep(60) # Give Instagram time to process the file
+        time.sleep(60) 
         
         url_pub = f"{domain}/{ig_user_id}/media_publish"
         pub_params = {
@@ -161,7 +158,7 @@ def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
 # =======================================================
 
 def start_bot():
-    print("\n🤖 GITHUB AUTOMATION BOT (RESUMABLE MODE) STARTED...")
+    print("\n🤖 GITHUB AUTOMATION BOT (FINAL HEADER FIX) STARTED...")
     print("-" * 50)
     
     sheet = get_sheet_connection()
@@ -170,7 +167,6 @@ def start_bot():
     try:
         records = sheet.get_all_records()
         headers = sheet.row_values(1)
-        # Find Status column dynamically or default to 5
         try: col_status = headers.index("Status") + 1
         except: col_status = 5
     except Exception as e:
@@ -182,7 +178,6 @@ def start_bot():
     for i, row in enumerate(records, start=2):
         brand = str(row.get("Brand_Name") or row.get("Account_Name") or row.get("Account Name", "")).strip().upper()
         status = str(row.get("Status", "")).strip().upper()
-        platform = str(row.get("Platform", "")).strip().upper()
         
         if status == "PENDING":
             if brand in BRAND_CONFIG:
@@ -196,17 +191,12 @@ def start_bot():
                 hashtags = row.get("Caption_Hashtags") or row.get("Hashtags", "")
                 caption = f"{title}\n.\n{hashtags}"
                 
-                # --- NEW LOGIC: DOWNLOAD -> UPLOAD ---
+                # Download -> Upload
                 local_file = download_video_locally(video_url)
                 
                 if local_file:
-                    success = False
-                    if "INSTAGRAM" in platform or "FACEBOOK" in platform:
-                         # Note: FB Reels can also use the same IG ID if linked, or we can add FB logic later.
-                         # Current priority is fixing the 403 error.
-                         success = upload_to_instagram_resumable(brand, ig_id, local_file, caption)
+                    success = upload_to_instagram_resumable(brand, ig_id, local_file, caption)
                     
-                    # Cleanup
                     if os.path.exists(local_file):
                         os.remove(local_file)
 
@@ -216,8 +206,6 @@ def start_bot():
                         processed_count += 1
                 else:
                     print("      ⚠️ Skipping: Could not download video.")
-            else:
-                 if brand: print(f"⚠️ Brand '{brand}' skipped (Not in config).")
 
     if processed_count == 0:
         print("\n💤 No PENDING tasks found.")
