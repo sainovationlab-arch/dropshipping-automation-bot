@@ -3,147 +3,157 @@ import time
 import json
 import requests
 import gspread
+import gdown  # New Library for Drive
 from google.oauth2.service_account import Credentials
 
 # =======================================================
-# 💎 ULTIMATE CONFIGURATION (Extracted from your GitHub File)
+# 💎 CONFIGURATION
 # =======================================================
 
-# 1. AUTH TOKEN (GitHub Secret માંથી લેશે)
-# જો લોકલ ટેસ્ટ કરતા હોવ, તો અહીં ટોકન લખી શકો છો.
+# 1. AUTH TOKEN
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 2. BRAND DATABASE (તમારી ફાઈલ મુજબના IDs)
+# 2. BRAND DATABASE (તમારા GitHub ફાઈલ મુજબ)
 BRAND_CONFIG = {
-    "PEARL VERSE": {
-        "ig_id": "17841478822408000"  # 
-    },
-    "DIAMOND DICE": {
-        "ig_id": "17841478369307404"  # 
-    },
-    "EMERALD EDGE": {
-        "ig_id": "17841478369307404"  #  (Note: Same as Diamond Dice in your file)
-    },
-    "URBAN GLINT": {
-        "ig_id": "17841479492205083"  # 
-    },
-    "LUXIVIBE": {
-        "ig_id": "17841479492205083"  #  (Note: Same as Urban Glint in your file)
-    },
-    "GRAND ORBIT": {
-        "ig_id": "17841479516066757"  # 
-    },
-    "OPUS ELITE": {
-        "ig_id": "17841479493645419"  # 
-    },
-    "ROYAL NEXUS": {
-        "ig_id": "17841479056452004"  # 
-    }
+    "PEARL VERSE": { "ig_id": "17841478822408000" },
+    "DIAMOND DICE": { "ig_id": "17841478369307404" },
+    "EMERALD EDGE": { "ig_id": "17841478369307404" },
+    "URBAN GLINT": { "ig_id": "17841479492205083" },
+    "LUXIVIBE": { "ig_id": "17841479492205083" },
+    "GRAND ORBIT": { "ig_id": "17841479516066757" },
+    "OPUS ELITE": { "ig_id": "17841479493645419" },
+    "ROYAL NEXUS": { "ig_id": "17841479056452004" }
 }
 
-# 3. Google Sheet Name & ID
-# તમારી ફાઈલમાં SPREADSHEET_ID env variable વપરાય છે 
-SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID") 
+# 3. SHEET SETTINGS
+SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 # =======================================================
 # ⚙️ SYSTEM CORE
 # =======================================================
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-
 def get_sheet_connection():
-    """Connects to Google Sheet via GitHub Secret OR Local File"""
-    
-    # Priority 1: GitHub Secret (GCP_CREDENTIALS as per your file [cite: 31])
+    """Connects to Google Sheet via GitHub Secret"""
     creds_json = os.environ.get("GCP_CREDENTIALS") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
     
     if creds_json:
-        print("🔐 Auth: Connecting via GitHub Secrets...")
         try:
             creds_dict = json.loads(creds_json)
             creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
             client = gspread.authorize(creds)
             
-            # Open by ID if available (Best practice from your file [cite: 32])
             if SPREADSHEET_ID:
                 return client.open_by_key(SPREADSHEET_ID).sheet1
             else:
                 return client.open("Content").sheet1
         except Exception as e:
-            print(f"❌ Secret Error: {e}")
+            print(f"❌ Auth Error: {e}")
             return None
-
-    # Priority 2: Local File (Testing)
-    elif os.path.exists("gkey.json"):
-        print("📂 Auth: Connecting via Local 'gkey.json'...")
-        creds = Credentials.from_service_account_file("gkey.json", scopes=SCOPES)
-        client = gspread.authorize(creds)
-        if SPREADSHEET_ID:
-            return client.open_by_key(SPREADSHEET_ID).sheet1
-        return client.open("Content").sheet1
     
-    else:
-        print("❌ CRITICAL ERROR: No Credentials Found.")
+    print("❌ CRITICAL: No Credentials Found.")
+    return None
+
+# =======================================================
+# 🔧 SMART UPLOAD FUNCTIONS (THE FIX)
+# =======================================================
+
+def download_video_locally(drive_url):
+    """Downloads Google Drive video to a local temp file"""
+    print("      ⬇️ Downloading video locally to bypass Google block...")
+    temp_filename = "temp_upload_video.mp4"
+    
+    # Remove existing file if any
+    if os.path.exists(temp_filename):
+        os.remove(temp_filename)
+
+    try:
+        # gdown is powerful for Drive Links
+        output = gdown.download(drive_url, temp_filename, quiet=False, fuzzy=True)
+        
+        if output and os.path.exists(temp_filename):
+            size = os.path.getsize(temp_filename)
+            print(f"      ✅ Downloaded ({size / 1024 / 1024:.2f} MB)")
+            return temp_filename
+        else:
+            print("      ❌ Download failed (File not found).")
+            return None
+    except Exception as e:
+        print(f"      ❌ Download Exception: {e}")
         return None
 
-# =======================================================
-# 🔧 SMART FUNCTIONS
-# =======================================================
-
-def convert_drive_link(url):
-    """Google Drive Link -> Direct Download Link"""
-    if "drive.google.com" in url and "/d/" in url:
-        try:
-            file_id = url.split('/d/')[1].split('/')[0]
-            return f"https://drive.google.com/uc?export=download&id={file_id}"
-        except:
-            return url
-    return url
-
-def upload_to_instagram(brand_name, ig_user_id, video_url, caption):
-    print(f"      📸 Instagram Upload ({brand_name})...")
+def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
+    """
+    Uploads the LOCAL file to Instagram using Resumable Upload Protocol.
+    This solves the 'robots.txt' / '403 Forbidden' error.
+    """
+    print(f"      📸 Instagram Resumable Upload ({brand_name})...")
     
-    if not ig_user_id:
-        print(f"      ⚠️ Skipping: Instagram ID missing for {brand_name}")
-        return False
-        
-    if not IG_ACCESS_TOKEN:
-        print("      ❌ Error: FB_ACCESS_TOKEN not found in environment.")
+    if not ig_user_id or not IG_ACCESS_TOKEN:
+        print("      ⚠️ Missing ID or Token.")
         return False
 
-    domain = "https://graph.facebook.com/v19.0" # Updated to v19.0 per your file [cite: 38]
-    
-    # 1. Create Container (Reels)
-    url_create = f"{domain}/{ig_user_id}/media"
-    payload = {
-        "media_type": "REELS",
-        "video_url": video_url,
-        "caption": caption,
-        "access_token": IG_ACCESS_TOKEN
-    }
+    domain = "https://graph.facebook.com/v19.0"
     
     try:
-        r = requests.post(url_create, data=payload)
-        if "id" not in r.json():
-            print(f"      ❌ IG Container Error: {r.json()}")
+        # STEP 1: INITIALIZE UPLOAD SESSION
+        url_init = f"{domain}/{ig_user_id}/media"
+        params = {
+            "upload_type": "resumable",
+            "media_type": "REELS",
+            "caption": caption,
+            "access_token": IG_ACCESS_TOKEN
+        }
+        
+        r_init = requests.post(url_init, params=params)
+        data_init = r_init.json()
+        
+        upload_uri = data_init.get("uri")
+        container_id = data_init.get("id")
+        
+        if not upload_uri or not container_id:
+            print(f"      ❌ Init Failed: {data_init}")
             return False
             
-        creation_id = r.json()["id"]
-        print(f"      ⏳ Waiting for Instagram Processing (45s)...")
-        time.sleep(45) # Increased wait time for safety
+        print(f"      🔹 Session Created. ID: {container_id}")
+
+        # STEP 2: UPLOAD THE FILE BYTES
+        file_size = os.path.getsize(file_path)
+        with open(file_path, "rb") as f:
+            headers = {
+                "Authorization": f"OAuth {IG_ACCESS_TOKEN}",
+                "file_offset": "0",
+                "file_size": str(file_size)
+            }
+            print("      🔹 Uploading bytes to Instagram...")
+            r_upload = requests.post(upload_uri, data=f, headers=headers)
         
-        # 2. Publish
+        if r_upload.status_code != 200:
+            print(f"      ❌ Byte Upload Failed: {r_upload.text}")
+            return False
+
+        # STEP 3: PUBLISH THE CONTAINER
+        print("      ⏳ Waiting for Media Processing (60s)...")
+        time.sleep(60) # Give Instagram time to process the file
+        
         url_pub = f"{domain}/{ig_user_id}/media_publish"
-        r_pub = requests.post(url_pub, data={"creation_id": creation_id, "access_token": IG_ACCESS_TOKEN})
+        pub_params = {
+            "creation_id": container_id,
+            "access_token": IG_ACCESS_TOKEN
+        }
         
-        if "id" in r_pub.json():
-            print(f"      ✅ Instagram Success! ID: {r_pub.json()['id']}")
+        r_pub = requests.post(url_pub, params=pub_params)
+        data_pub = r_pub.json()
+        
+        if "id" in data_pub:
+            print(f"      🎉 SUCCESS! Published Reel ID: {data_pub['id']}")
             return True
         else:
-            print(f"      ❌ IG Publish Error: {r_pub.json()}")
+            print(f"      ❌ Publish Failed: {data_pub}")
             return False
+
     except Exception as e:
-        print(f"      ❌ Error: {e}")
+        print(f"      ❌ Exception: {e}")
         return False
 
 # =======================================================
@@ -151,7 +161,7 @@ def upload_to_instagram(brand_name, ig_user_id, video_url, caption):
 # =======================================================
 
 def start_bot():
-    print("\n🤖 GITHUB AUTOMATION BOT STARTED (Based on Uploaded File)...")
+    print("\n🤖 GITHUB AUTOMATION BOT (RESUMABLE MODE) STARTED...")
     print("-" * 50)
     
     sheet = get_sheet_connection()
@@ -160,12 +170,9 @@ def start_bot():
     try:
         records = sheet.get_all_records()
         headers = sheet.row_values(1)
-        # Dynamic Column Finding
-        try:
-            col_status = headers.index("Status") + 1
-        except:
-            # Fallback based on your file logic (Col 5 / E is common) [cite: 7]
-            col_status = 5 
+        # Find Status column dynamically or default to 5
+        try: col_status = headers.index("Status") + 1
+        except: col_status = 5
     except Exception as e:
         print(f"❌ Error Reading Sheet: {e}")
         return
@@ -173,50 +180,47 @@ def start_bot():
     processed_count = 0
 
     for i, row in enumerate(records, start=2):
-        # Flexible Key Access (Handle 'Account Name' or 'Brand_Name')
         brand = str(row.get("Brand_Name") or row.get("Account_Name") or row.get("Account Name", "")).strip().upper()
         status = str(row.get("Status", "")).strip().upper()
         platform = str(row.get("Platform", "")).strip().upper()
         
         if status == "PENDING":
-            # બ્રાન્ડ ડેટાબેઝ ચેક કરો
             if brand in BRAND_CONFIG:
                 print(f"\n👉 Processing Row {i}: {row.get('Title_Hook') or row.get('Title')} | Brand: {brand}")
                 
                 ig_id = BRAND_CONFIG[brand]["ig_id"]
+                video_url = row.get("Video_URL") or row.get("Video Link", "")
                 
-                # Link handling
-                video_url = convert_drive_link(row.get("Video_URL") or row.get("Video Link", ""))
-                
-                # Caption handling
+                # Caption
                 title = row.get("Title_Hook") or row.get("Title", "")
                 hashtags = row.get("Caption_Hashtags") or row.get("Hashtags", "")
                 caption = f"{title}\n.\n{hashtags}"
                 
-                success = False
+                # --- NEW LOGIC: DOWNLOAD -> UPLOAD ---
+                local_file = download_video_locally(video_url)
                 
-                if "INSTAGRAM" in platform:
-                    success = upload_to_instagram(brand, ig_id, video_url, caption)
-                
-                elif "FACEBOOK" in platform:
-                     # જો FB અને Insta લિંક હોય તો આ જ ID થી ચાલી શકે, નહીંતર પેજ ID જોઈએ
-                     # તમારી ફાઈલમાં પેજ ID મળ્યા નથી, એટલે IG મેથડ જ વાપરીએ છીએ
-                     success = upload_to_instagram(brand, ig_id, video_url, caption)
-                
-                else:
-                    print(f"      ⚠️ Platform '{platform}' skipped in this run.")
+                if local_file:
+                    success = False
+                    if "INSTAGRAM" in platform or "FACEBOOK" in platform:
+                         # Note: FB Reels can also use the same IG ID if linked, or we can add FB logic later.
+                         # Current priority is fixing the 403 error.
+                         success = upload_to_instagram_resumable(brand, ig_id, local_file, caption)
+                    
+                    # Cleanup
+                    if os.path.exists(local_file):
+                        os.remove(local_file)
 
-                if success:
-                    sheet.update_cell(i, col_status, "POSTED")
-                    print(f"      📝 Sheet Updated: POSTED")
-                    processed_count += 1
+                    if success:
+                        sheet.update_cell(i, col_status, "POSTED")
+                        print(f"      📝 Sheet Updated: POSTED")
+                        processed_count += 1
+                else:
+                    print("      ⚠️ Skipping: Could not download video.")
             else:
-                 # જો બ્રાન્ડ લિસ્ટમાં ન હોય
-                 if brand:
-                    print(f"⚠️ Brand '{brand}' not in config. Available: {list(BRAND_CONFIG.keys())}")
+                 if brand: print(f"⚠️ Brand '{brand}' skipped (Not in config).")
 
     if processed_count == 0:
-        print("\n💤 No PENDING tasks found for configured brands.")
+        print("\n💤 No PENDING tasks found.")
     else:
         print(f"\n🎉 Job Done! Total Uploads: {processed_count}")
 
