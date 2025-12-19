@@ -2,9 +2,11 @@ import os
 import time
 import json
 import requests
+import io
 import gspread
-import gdown  
 from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
 # =======================================================
 # 💎 CONFIGURATION
@@ -13,11 +15,11 @@ from google.oauth2.service_account import Credentials
 # 1. AUTH TOKEN
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 2. BRAND DATABASE
+# 2. BRAND DATABASE (ID KHAS CHECK KARJO)
 BRAND_CONFIG = {
     "PEARL VERSE": { "ig_id": "17841478822408000" },
     "DIAMOND DICE": { "ig_id": "17841478369307404" },
-    "EMERALD EDGE": { "ig_id": "17841478369307404" },
+    "EMERALD EDGE": { "ig_id": "17841478369307404" }, # <-- AHINYA SACHO ID NAKHJO
     "URBAN GLINT": { "ig_id": "17841479492205083" },
     "LUXIVIBE": { "ig_id": "17841479492205083" },
     "GRAND ORBIT": { "ig_id": "17841479516066757" },
@@ -30,60 +32,82 @@ SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 # =======================================================
-# ⚙️ SYSTEM CORE
+# ⚙️ SYSTEM CORE (SECURE CONNECT)
 # =======================================================
 
-def get_sheet_connection():
-    """Connects to Google Sheet via GitHub Secret"""
+def get_credentials():
+    """Fetches Credentials object from Env or Local File"""
     creds_json = os.environ.get("GCP_CREDENTIALS") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
     
     if creds_json:
-        try:
-            creds_dict = json.loads(creds_json)
-            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-            client = gspread.authorize(creds)
-            
-            if SPREADSHEET_ID:
-                return client.open_by_key(SPREADSHEET_ID).sheet1
-            else:
-                return client.open("Content").sheet1
-        except Exception as e:
-            print(f"❌ Auth Error: {e}")
-            return None
+        creds_dict = json.loads(creds_json)
+        return Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     
-    print("❌ CRITICAL: No Credentials Found.")
+    elif os.path.exists("gkey.json"):
+        return Credentials.from_service_account_file("gkey.json", scopes=SCOPES)
+    
     return None
 
+def get_services():
+    """Returns authenticated Google Sheet AND Drive Service"""
+    creds = get_credentials()
+    if not creds:
+        print("❌ CRITICAL: No Credentials Found.")
+        return None, None
+
+    # Sheet Service
+    client = gspread.authorize(creds)
+    if SPREADSHEET_ID:
+        sheet = client.open_by_key(SPREADSHEET_ID).sheet1
+    else:
+        sheet = client.open("Content").sheet1
+
+    # Drive Service (For Secure Download)
+    drive_service = build('drive', 'v3', credentials=creds)
+    
+    return sheet, drive_service
+
 # =======================================================
-# 🔧 SMART UPLOAD FUNCTIONS (HEADER FIX APPLIED)
+# 🔧 SMART UPLOAD FUNCTIONS
 # =======================================================
 
-def download_video_locally(drive_url):
-    """Downloads Google Drive video to a local temp file"""
-    print("      ⬇️ Downloading video locally to bypass Google block...")
+def download_video_securely(drive_service, drive_url):
+    """Downloads video using Official Google Drive API"""
+    print("      ⬇️ Downloading video securely via API...")
     temp_filename = "temp_upload_video.mp4"
     
     if os.path.exists(temp_filename):
         os.remove(temp_filename)
 
+    # Extract File ID
+    file_id = None
+    if "/d/" in drive_url:
+        file_id = drive_url.split('/d/')[1].split('/')[0]
+    elif "id=" in drive_url:
+        file_id = drive_url.split('id=')[1].split('&')[0]
+    
+    if not file_id:
+        print("      ❌ Invalid Drive URL format.")
+        return None
+
     try:
-        output = gdown.download(drive_url, temp_filename, quiet=False, fuzzy=True)
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = io.FileIO(temp_filename, 'wb')
+        downloader = MediaIoBaseDownload(fh, request)
         
-        if output and os.path.exists(temp_filename):
-            size = os.path.getsize(temp_filename)
-            print(f"      ✅ Downloaded ({size / 1024 / 1024:.2f} MB)")
-            return temp_filename
-        else:
-            print("      ❌ Download failed (File not found).")
-            return None
+        done = False
+        while done is False:
+            status, done = downloader.next_chunk()
+        
+        print(f"      ✅ Download Complete! (Secure Mode)")
+        return temp_filename
+
     except Exception as e:
-        print(f"      ❌ Download Exception: {e}")
+        print(f"      ❌ Download Error: {e}")
         return None
 
 def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
-    """
-    FIXED: Uses correct headers ('offset' instead of 'file_offset')
-    """
+    """Resumable Upload to bypass Timeouts"""
     print(f"      📸 Instagram Resumable Upload ({brand_name})...")
     
     if not ig_user_id or not IG_ACCESS_TOKEN:
@@ -93,7 +117,7 @@ def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
     domain = "https://graph.facebook.com/v19.0"
     
     try:
-        # STEP 1: INITIALIZE UPLOAD SESSION
+        # STEP 1: INITIALIZE
         url_init = f"{domain}/{ig_user_id}/media"
         params = {
             "upload_type": "resumable",
@@ -105,48 +129,42 @@ def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
         r_init = requests.post(url_init, params=params)
         data_init = r_init.json()
         
-        upload_uri = data_init.get("uri")
-        container_id = data_init.get("id")
-        
-        if not upload_uri or not container_id:
+        if "id" not in data_init:
             print(f"      ❌ Init Failed: {data_init}")
             return False
             
+        upload_uri = data_init["uri"]
+        container_id = data_init["id"]
         print(f"      🔹 Session Created. ID: {container_id}")
 
-        # STEP 2: UPLOAD THE FILE BYTES (HEADER FIX HERE)
+        # STEP 2: UPLOAD BYTES
         file_size = os.path.getsize(file_path)
         with open(file_path, "rb") as f:
             headers = {
                 "Authorization": f"OAuth {IG_ACCESS_TOKEN}",
-                "offset": "0",              # <--- SUNDAYO: 'file_offset' hatu te 'offset' karyu
+                "offset": "0",
                 "file_size": str(file_size)
             }
-            print("      🔹 Uploading bytes to Instagram...")
+            print("      🔹 Uploading bytes...")
             r_upload = requests.post(upload_uri, data=f, headers=headers)
         
         if r_upload.status_code != 200:
             print(f"      ❌ Byte Upload Failed: {r_upload.text}")
             return False
 
-        # STEP 3: PUBLISH THE CONTAINER
-        print("      ⏳ Waiting for Media Processing (60s)...")
-        time.sleep(60) 
+        # STEP 3: PUBLISH
+        print("      ⏳ Waiting for Processing (60s)...")
+        time.sleep(60)
         
         url_pub = f"{domain}/{ig_user_id}/media_publish"
-        pub_params = {
-            "creation_id": container_id,
-            "access_token": IG_ACCESS_TOKEN
-        }
-        
+        pub_params = {"creation_id": container_id, "access_token": IG_ACCESS_TOKEN}
         r_pub = requests.post(url_pub, params=pub_params)
-        data_pub = r_pub.json()
         
-        if "id" in data_pub:
-            print(f"      🎉 SUCCESS! Published Reel ID: {data_pub['id']}")
+        if "id" in r_pub.json():
+            print(f"      🎉 SUCCESS! Published ID: {r_pub.json()['id']}")
             return True
         else:
-            print(f"      ❌ Publish Failed: {data_pub}")
+            print(f"      ❌ Publish Failed: {r_pub.json()}")
             return False
 
     except Exception as e:
@@ -158,11 +176,11 @@ def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
 # =======================================================
 
 def start_bot():
-    print("\n🤖 GITHUB AUTOMATION BOT (FINAL HEADER FIX) STARTED...")
     print("-" * 50)
+    print(f"⏰ CHECKING FOR NEW TASKS: {time.ctime()}")
     
-    sheet = get_sheet_connection()
-    if not sheet: return
+    sheet, drive_service = get_services()
+    if not sheet or not drive_service: return
 
     try:
         records = sheet.get_all_records()
@@ -191,26 +209,42 @@ def start_bot():
                 hashtags = row.get("Caption_Hashtags") or row.get("Hashtags", "")
                 caption = f"{title}\n.\n{hashtags}"
                 
-                # Download -> Upload
-                local_file = download_video_locally(video_url)
+                # --- SECURE DOWNLOAD & UPLOAD ---
+                local_file = download_video_securely(drive_service, video_url)
                 
                 if local_file:
                     success = upload_to_instagram_resumable(brand, ig_id, local_file, caption)
                     
-                    if os.path.exists(local_file):
-                        os.remove(local_file)
+                    if os.path.exists(local_file): os.remove(local_file)
 
                     if success:
                         sheet.update_cell(i, col_status, "POSTED")
                         print(f"      📝 Sheet Updated: POSTED")
                         processed_count += 1
                 else:
-                    print("      ⚠️ Skipping: Could not download video.")
+                    print("      ⚠️ Skipping: Download failed.")
 
     if processed_count == 0:
-        print("\n💤 No PENDING tasks found.")
+        print("💤 No tasks found.")
     else:
-        print(f"\n🎉 Job Done! Total Uploads: {processed_count}")
+        print(f"🎉 Job Done! Uploads in this cycle: {processed_count}")
+
+# =======================================================
+# 🔄 AUTOMATION LOOP (RUNS EVERY 5 MINUTES)
+# =======================================================
+
+def run_continuously():
+    print("\n🚀 BOT IS NOW IN AUTO-PILOT MODE (Checking every 5 mins)...")
+    print("Press Ctrl+C to stop manually.\n")
+    
+    while True:
+        try:
+            start_bot()
+            print("\n💤 Sleeping for 5 minutes... (Next check soon)")
+            time.sleep(300)  # 300 seconds = 5 Minutes
+        except Exception as e:
+            print(f"❌ Crash prevented: {e}")
+            time.sleep(60)
 
 if __name__ == "__main__":
-    start_bot()
+    run_continuously()
