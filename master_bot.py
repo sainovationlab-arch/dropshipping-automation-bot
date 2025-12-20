@@ -10,54 +10,67 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 # =======================================================
-# 💎 CONFIGURATION
+# 💎 CONFIGURATION (FINAL)
 # =======================================================
 
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
+
+# 👇 Tamaru Dropshipping Sheet ID (Logs mathi malealu)
 DROPSHIPPING_SHEET_ID = "1lrn-plbxc7w4wHBLYoCfP_UYIP6EVJbj79IdBUP5sgs"
 
-# Brand IDs
+# 👇 TAMARA BADHA BRAND IDS
 BRAND_CONFIG = {
     "URBAN GLINT": { "ig_id": "17841479492205083", "fb_id": "892844607248221" },
     "GRAND ORBIT": { "ig_id": "17841479516066757", "fb_id": "817698004771102" },
     "ROYAL NEXUS": { "ig_id": "17841479056452004", "fb_id": "854486334423509" },
     "LUXIVIBE": { "ig_id": "17841479492205083", "fb_id": "777935382078740" },
     "DIAMOND DICE": { "ig_id": "17841478369307404", "fb_id": "873607589175898" },
-    # Add more accounts here...
+    "PEARL VERSE": { "ig_id": "17841478822408000", "fb_id": "927694300421135" },
+    "OPUS ELITE": { "ig_id": "17841479493645419", "fb_id": "938320336026787" },
+    # Ahiya bija accounts add kari shako cho...
 }
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 # =======================================================
-# 🧠 SMART TIME LOGIC (INDIA TIME)
+# 🧠 SMART TIME LOGIC (AM/PM SUPPORT)
 # =======================================================
 
 def get_ist_time():
-    # GitHub servers UTC ma hoy, apanene +5:30 karia etle India time male
+    # Server UTC ma hoy, apanene India Time (+5:30) joie
     utc_now = datetime.utcnow()
     ist_now = utc_now + timedelta(hours=5, minutes=30)
     return ist_now
 
 def is_time_to_post(sheet_date_str, sheet_time_str):
     try:
-        # Current India Time
         ist_now = get_ist_time()
         
-        # Sheet Data Parsing (Date: 20/12/2025, Time: 12:14)
-        # Assuming Date format DD/MM/YYYY and Time HH:MM (24 hour)
-        scheduled_dt_str = f"{sheet_date_str} {sheet_time_str}"
-        scheduled_dt = datetime.strptime(scheduled_dt_str, "%d/%m/%Y %H:%M")
+        # Space safai (Bhul thi " 9:00 AM " lakhyu hoy to chale)
+        date_clean = sheet_date_str.strip()
+        time_clean = sheet_time_str.strip().upper() # AM/PM ne Upper case kare
         
+        full_time_str = f"{date_clean} {time_clean}"
+        
+        # 👇 MAGIC: Have robot banne format samjse (Space hoy ke na hoy)
+        # Try 1: "9:15 AM" (Vache space hoy)
+        try:
+            scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %I:%M %p")
+        except ValueError:
+            # Try 2: "9:15AM" (Vache space na hoy)
+            scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %I:%M%p")
+
         print(f"      🕒 Scheduled: {scheduled_dt} | Current IST: {ist_now.strftime('%Y-%m-%d %H:%M')}")
 
-        # Check Logic
+        # Compare logic
         if ist_now >= scheduled_dt:
-            return True # Time thai gayo che!
+            return True # Time Thai Gayo!
         else:
             return False # Haju vaar che
+            
     except ValueError:
-        print(f"      ⚠️ Date/Time Format Error! (Use DD/MM/YYYY and HH:MM)")
-        return False # Format khotu hoy to risk nahi Levanu
+        print(f"      ⚠️ Date/Time Format Error! (Use: 20/12/2025 and 9:15 AM)")
+        return False
 
 # =======================================================
 # ⚙️ SYSTEM CORE
@@ -69,7 +82,10 @@ def get_services():
     try:
         creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=SCOPES)
         client = gspread.authorize(creds)
+        
+        # Dropshipping Sheet Open kare che
         sheet = client.open_by_key(DROPSHIPPING_SHEET_ID).sheet1
+        
         drive_service = build('drive', 'v3', credentials=creds)
         return sheet, drive_service
     except Exception as e:
@@ -122,12 +138,12 @@ def upload_to_facebook(fb_id, file_path, caption):
     except: return False
 
 # =======================================================
-# 🚀 MAIN EXECUTION (SMART MODE)
+# 🚀 MAIN EXECUTION (SMART AM/PM MODE)
 # =======================================================
 
 def start_bot():
     print("-" * 50)
-    print(f"⏰ DROPSHIPPING SMART-BOT STARTED (IST MODE)...")
+    print(f"⏰ DROPSHIPPING SMART-BOT STARTED (IST + AM/PM)...")
     
     sheet, drive_service = get_services()
     if not sheet: return
@@ -144,18 +160,18 @@ def start_bot():
     for i, row in enumerate(records, start=2):
         status = str(row.get("Status", "")).strip()
         
-        # Only check rows that are PENDING
+        # Pending hoy toj check karvanu
         if status == "Pending":
             brand = str(row.get("Account Name", "")).strip().upper()
             
-            # 👇 NEW: Check Time & Date
-            sheet_date = str(row.get("Date", "")).strip() # Column A
-            sheet_time = str(row.get("Schedule_Time", "")).strip() # Column C
+            # 👇 NEW: Check Time & Date (AM/PM)
+            sheet_date = str(row.get("Date", "")).strip() 
+            sheet_time = str(row.get("Schedule_Time", "")).strip()
             
             print(f"\n👉 Checking Row {i} for {brand}...")
 
             if is_time_to_post(sheet_date, sheet_time):
-                # Time thai gayo che! Have upload karo.
+                # Time thai gayo che!
                 if brand in BRAND_CONFIG:
                     ig_id = BRAND_CONFIG[brand].get("ig_id")
                     fb_id = BRAND_CONFIG[brand].get("fb_id")
@@ -188,7 +204,7 @@ def start_bot():
                     print(f"      ⚠️ Brand '{brand}' Config ma nathi!")
             else:
                 # Time nathi thayo
-                print(f"      ⏳ WAIT: Haju time nathi thayo. Skipping.")
+                print(f"      ⏳ WAIT: Haju time nathi thayo ({sheet_time}).")
 
     if count == 0:
         print("\n💤 No posts due right now.")
