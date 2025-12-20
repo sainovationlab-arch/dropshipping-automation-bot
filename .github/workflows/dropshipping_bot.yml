@@ -1,39 +1,37 @@
-name: Dropshipping Auto Bot (Final)
+name: Master Content Automation Bot
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '15 * * * *'
+    # ⏰ Dar 30 minute e run thase (Best for avoiding traffic)
+    - cron: '*/30 * * * *'
+  workflow_dispatch:      # Manual trigger button
+
+# 👇 AA SECTION TRAFFIC JAM ROKSHE 👇
+concurrency:
+  group: production
+  cancel-in-progress: true
 
 jobs:
-  run_bot:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20  # 20 min thi vadhu koi job nahi chale
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
       - name: Set up Python
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
-      
-      - name: Install Libraries
-        run: pip install gspread google-auth google-api-python-client oauth2client requests gdown tenacity
+          python-version: '3.9'
 
-      - name: Run Master Bot
+      - name: Install Dependencies
+        run: |
+          pip install requests gspread oauth2client google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client
+
+      - name: Run Automation Bot
         env:
-          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
           FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
-          
-          # 👇 8 ચેનલની 8 નવી ચાવીઓ
-          YT_PEARL_VERSE: ${{ secrets.YT_PEARL_VERSE }}
-          YT_OPUS_ELITE: ${{ secrets.YT_OPUS_ELITE }}
-          YT_DIAMOND_DICE: ${{ secrets.YT_DIAMOND_DICE }}
-          YT_EMERALD_EDGE: ${{ secrets.YT_EMERALD_EDGE }}
-          YT_ROYAL_NEXUS: ${{ secrets.YT_ROYAL_NEXUS }}
-          YT_GRAND_ORBIT: ${{ secrets.YT_GRAND_ORBIT }}
-          YT_URBAN_GLINT: ${{ secrets.YT_URBAN_GLINT }}
-          YT_LUXI_VIBE: ${{ secrets.YT_LUXI_VIBE }}
-
-          # 👇 Dropshipping Sheet ID (આ તમારી Dropshipping Sheet છે)
-          SPREADSHEET_ID: '17XTdZkbnHPUgUhOVzAtUDM76YFhM0Yh9UBABHAa_hAA'
-        
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: python master_bot_final.py
