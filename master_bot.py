@@ -58,7 +58,7 @@ SPREADSHEET_ID = "1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 # =======================================================
-# 🧠 SMART TIME LOGIC (AM/PM SUPPORT)
+# 🧠 SNIPER TIME LOGIC (SMART WAIT + AM/PM)
 # =======================================================
 
 def get_ist_time():
@@ -66,7 +66,11 @@ def get_ist_time():
     ist_now = utc_now + timedelta(hours=5, minutes=30)
     return ist_now
 
-def is_time_to_post(sheet_date_str, sheet_time_str):
+def check_time_and_wait(sheet_date_str, sheet_time_str):
+    """
+    Aa function check karse. Jo 5 min karta ochi vaar hoy,
+    to RAAH JOSE (Sleep) ane exact time e post karse.
+    """
     try:
         ist_now = get_ist_time()
         
@@ -79,7 +83,7 @@ def is_time_to_post(sheet_date_str, sheet_time_str):
 
         full_time_str = f"{date_clean} {time_clean}"
         
-        # 👇 AM/PM Logic (With or Without Space)
+        # 👇 AM/PM Logic (Parsing)
         try:
             # Try 1: "20/12/2025 9:15 AM"
             scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %I:%M %p")
@@ -88,15 +92,30 @@ def is_time_to_post(sheet_date_str, sheet_time_str):
                 # Try 2: "20/12/2025 9:15AM"
                 scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %I:%M%p")
             except ValueError:
-                # Fallback for 24h format just in case
+                # Fallback for 24h format
                 scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %H:%M")
 
-        print(f"      🕒 Scheduled: {scheduled_dt} | Current IST: {ist_now.strftime('%d/%m/%Y %H:%M')}")
+        # Calculate Difference in Seconds
+        time_diff = (scheduled_dt - ist_now).total_seconds()
+        
+        print(f"      🕒 Scheduled: {scheduled_dt.strftime('%H:%M')} | Now: {ist_now.strftime('%H:%M')} | Gap: {int(time_diff)}s")
 
-        if ist_now >= scheduled_dt:
+        # LOGIC 1: Time Thai Gayo Che (Already Late or Exact)
+        if time_diff <= 0:
             return True 
+        
+        # LOGIC 2: SNIPER MODE (Within 5 Minutes / 300 Seconds)
+        elif 0 < time_diff <= 300:
+            print(f"      👀 TARGET LOCKED! Waiting {int(time_diff)}s to hit exact time...")
+            time.sleep(time_diff + 2) # Wait exact seconds + buffer
+            print("      🔫 BOOM! Exact Time Reached. Uploading...")
+            return True
+            
+        # LOGIC 3: Too Early (More than 5 mins left)
         else:
+            print(f"      💤 Too early. Will check later.")
             return False 
+
     except ValueError:
         print(f"      ⚠️ Date/Time Skipped or Invalid (Use: 20/12/2025 & 2:30 PM)")
         return False 
@@ -232,12 +251,12 @@ def upload_to_facebook(brand_name, fb_page_id, file_path, caption):
         return False
 
 # =======================================================
-# 🚀 MAIN EXECUTION (SMART MODE)
+# 🚀 MAIN EXECUTION (SMART SNIPER MODE)
 # =======================================================
 
 def start_bot():
     print("-" * 50)
-    print(f"⏰ CONTENT SMART-BOT STARTED (IST + AM/PM)...")
+    print(f"⏰ CONTENT SNIPER-BOT STARTED (IST + AM/PM)...")
     
     sheet, drive_service = get_services()
     if not sheet or not drive_service: return
@@ -258,14 +277,14 @@ def start_bot():
         status = str(row.get("Status", "")).strip().upper()
         
         if status == "PENDING":
-            # 👇 SUDHARO: Have 'Schedule_Date' vaanchse (Tamari sheet mujab)
+            # 👇 Ahiya 'Schedule_Date' vaanchse
             sheet_date = str(row.get("Schedule_Date", "")).strip()
             sheet_time = str(row.get("Schedule_Time", "")).strip()
             
             print(f"\n👉 Checking Row {i}: {row.get('Title_Hook') or row.get('Title')} | Brand: {brand}")
             
-            # Jo Time Thai Gayo Hoy TO J Upload Karo
-            if is_time_to_post(sheet_date, sheet_time):
+            # 👇 Ahiya Sniper Logic Call Thase
+            if check_time_and_wait(sheet_date, sheet_time):
                 
                 if brand in BRAND_CONFIG:
                     
@@ -304,10 +323,10 @@ def start_bot():
                     else:
                         print("      ⚠️ Skipping: Download failed.")
             else:
-                print(f"      ⏳ WAIT: Time nathi thayo ({sheet_time}).")
+                pass # Already printed "Too early" inside function
 
     if processed_count == 0:
-        print("💤 No posts due right now.")
+        print("💤 No posts ready immediately.")
     else:
         print(f"🎉 Job Done! Uploads in this cycle: {processed_count}")
 
