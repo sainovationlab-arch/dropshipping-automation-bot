@@ -1,4 +1,4 @@
-name: Master Content Automation Bot
+name: Dropshipping Auto Bot (Final)
 
 on:
   schedule:
@@ -6,16 +6,15 @@ on:
     - cron: '*/5 * * * *'
   workflow_dispatch:      # Manual trigger button
 
-# 👇 AA SECTION TRAFFIC JAM ROKSHE
+# 👇 TRAFFIC JAM PREVENTION
 concurrency:
-  group: production
+  group: dropshipping-production
   cancel-in-progress: true
-# Jo juno bot chalu hase, to te bandh thai jase ane navo chalu thase.
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 5  # 5 min thi vadhu koi job nahi chale (Safety)
+    timeout-minutes: 5
 
     steps:
       - name: Checkout Code
