@@ -13,20 +13,42 @@ from googleapiclient.http import MediaIoBaseDownload
 # 💎 CONFIGURATION (DROPSHIPPING)
 # =======================================================
 
+# 1. AUTH TOKEN
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 👇 Dropshipping Sheet ID (Fixed)
+# 2. DROPSHIPPING SHEET ID
 DROPSHIPPING_SHEET_ID = "1lrn-plbxc7w4wHBLYoCfP_UYIP6EVJbj79IdBUP5sgs"
 
-# Brand Config
+# 3. BRAND CONFIG (All IDs Fixed & Verified)
 BRAND_CONFIG = {
-    "URBAN GLINT": { "ig_id": "17841479492205083", "fb_id": "892844607248221" },
-    "GRAND ORBIT": { "ig_id": "17841479516066757", "fb_id": "817698004771102" },
-    "ROYAL NEXUS": { "ig_id": "17841479056452004", "fb_id": "854486334423509" },
-    "LUXIVIBE": { "ig_id": "17841479492205083", "fb_id": "777935382078740" },
-    "DIAMOND DICE": { "ig_id": "17841478369307404", "fb_id": "873607589175898" },
-    "PEARL VERSE": { "ig_id": "17841478822408000", "fb_id": "927694300421135" },
-    "OPUS ELITE": { "ig_id": "17841479493645419", "fb_id": "938320336026787" }
+    "URBAN GLINT": { 
+        "ig_id": "17841479492205083", 
+        "fb_id": "892844607248221" 
+    },
+    "GRAND ORBIT": { 
+        "ig_id": "17841479516066757", 
+        "fb_id": "817698004771102" 
+    },
+    "ROYAL NEXUS": { 
+        "ig_id": "17841479056452004", 
+        "fb_id": "854486334423509" 
+    },
+    "LUXIVIBE": { 
+        "ig_id": "17841478140648372",  # ✅ Fixed (Saachu ID)
+        "fb_id": "777935382078740" 
+    },
+    "DIAMOND DICE": { 
+        "ig_id": "17841478369307404", 
+        "fb_id": "873607589175898" 
+    },
+    "PEARL VERSE": { 
+        "ig_id": "17841478822408000", 
+        "fb_id": "927694300421135" 
+    },
+    "OPUS ELITE": { 
+        "ig_id": "17841479493645419", 
+        "fb_id": "938320336026787" 
+    }
 }
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -100,9 +122,15 @@ def get_services():
     try:
         creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=SCOPES)
         client = gspread.authorize(creds)
+        
         # Open Dropshipping Sheet
-        sheet = client.open_by_key(DROPSHIPPING_SHEET_ID).sheet1
-        print("✅ Dropshipping Sheet Connected.")
+        try:
+            sheet = client.open_by_key(DROPSHIPPING_SHEET_ID).sheet1
+            print("✅ Dropshipping Sheet Connected.")
+        except:
+            print("❌ Sheet ID Invalid.")
+            return None, None
+
         drive_service = build('drive', 'v3', credentials=creds)
         return sheet, drive_service
     except Exception as e:
@@ -128,7 +156,9 @@ def download_video_securely(drive_service, drive_url):
 
 def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
     print(f"      📸 Instagram Upload ({brand_name})...")
-    if not ig_user_id: return False
+    if not ig_user_id: 
+        print(f"      ⚠️ No IG ID for {brand_name}")
+        return False
     domain = "https://graph.facebook.com/v19.0"
     try:
         url = f"{domain}/{ig_user_id}/media"
@@ -178,7 +208,7 @@ def start_bot():
         status = str(row.get("Status", "")).strip()
         
         if status == "Pending":
-            # Dropshipping uses 'Date' column (Not Schedule_Date)
+            # Dropshipping uses 'Date' column
             sheet_date = str(row.get("Date", "")).strip()
             sheet_time = str(row.get("Schedule_Time", "")).strip()
             brand = str(row.get("Account Name", "")).strip().upper()
@@ -216,7 +246,7 @@ def start_bot():
                             count += 1
                             time.sleep(10)
             else:
-                pass # Wait logic already handled inside function
+                pass 
 
     if count == 0:
         print("💤 No posts ready.")
