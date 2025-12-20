@@ -4,7 +4,7 @@ import json
 import requests
 import io
 import gspread
-from datetime import datetime, timedelta  # <--- Smart Work added
+from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -16,7 +16,7 @@ from googleapiclient.http import MediaIoBaseDownload
 # 1. AUTH TOKEN
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 2. BRAND DATABASE (Tamara badha brands ahiya surakshit che)
+# 2. BRAND DATABASE
 BRAND_CONFIG = {
     "PEARL VERSE": { 
         "ig_id": "17841478822408000", 
@@ -53,7 +53,7 @@ BRAND_CONFIG = {
 }
 
 # 3. SHEET SETTINGS
-# 👇 Content Sheet ID ahiya Hardcode kari didhi che (Logs mujab)
+# Content Sheet ID (Fixed)
 SPREADSHEET_ID = "1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
@@ -74,15 +74,18 @@ def is_time_to_post(sheet_date_str, sheet_time_str):
         date_clean = str(sheet_date_str).strip()
         time_clean = str(sheet_time_str).strip().upper() # AM/PM Uppercase
         
+        if not date_clean or not time_clean:
+            return False
+
         full_time_str = f"{date_clean} {time_clean}"
         
         # 👇 AM/PM Logic (With or Without Space)
         try:
-            # Try 1: "9:15 AM"
+            # Try 1: "20/12/2025 9:15 AM"
             scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %I:%M %p")
         except ValueError:
-            # Try 2: "9:15AM" or other formats
             try:
+                # Try 2: "20/12/2025 9:15AM"
                 scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %I:%M%p")
             except ValueError:
                 # Fallback for 24h format just in case
@@ -255,8 +258,8 @@ def start_bot():
         status = str(row.get("Status", "")).strip().upper()
         
         if status == "PENDING":
-            # 👇 Ahiya Time Logic Check Thase
-            sheet_date = str(row.get("Date", "")).strip()
+            # 👇 SUDHARO: Have 'Schedule_Date' vaanchse (Tamari sheet mujab)
+            sheet_date = str(row.get("Schedule_Date", "")).strip()
             sheet_time = str(row.get("Schedule_Time", "")).strip()
             
             print(f"\n👉 Checking Row {i}: {row.get('Title_Hook') or row.get('Title')} | Brand: {brand}")
