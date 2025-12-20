@@ -15,11 +15,12 @@ from googleapiclient.http import MediaIoBaseDownload
 # 1. AUTH TOKEN
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 2. BRAND DATABASE (ID KHAS CHECK KARJO)
+# 2. BRAND DATABASE
+# ⚠️ AHINYA TAMARA SACHA IDs CHECK KARI LEJO
 BRAND_CONFIG = {
     "PEARL VERSE": { "ig_id": "17841478822408000" },
     "DIAMOND DICE": { "ig_id": "17841478369307404" },
-    "EMERALD EDGE": { "ig_id": "17841478369307404" }, # <-- AHINYA SACHO ID NAKHJO
+    "EMERALD EDGE": { "ig_id": "17841478369307404" },  # <--- AHINYA SACHO ID MUKJO
     "URBAN GLINT": { "ig_id": "17841479492205083" },
     "LUXIVIBE": { "ig_id": "17841479492205083" },
     "GRAND ORBIT": { "ig_id": "17841479516066757" },
@@ -172,12 +173,12 @@ def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
         return False
 
 # =======================================================
-# 🚀 MAIN EXECUTION
+# 🚀 MAIN EXECUTION (NO LOOP - FOR GITHUB ACTIONS)
 # =======================================================
 
 def start_bot():
     print("-" * 50)
-    print(f"⏰ CHECKING FOR NEW TASKS: {time.ctime()}")
+    print(f"⏰ BOT STARTED AT: {time.ctime()}")
     
     sheet, drive_service = get_services()
     if not sheet or not drive_service: return
@@ -221,30 +222,16 @@ def start_bot():
                         sheet.update_cell(i, col_status, "POSTED")
                         print(f"      📝 Sheet Updated: POSTED")
                         processed_count += 1
+                        
+                        # 💡 Safety Pause: Waiting 10 seconds before next post
+                        time.sleep(10)
                 else:
                     print("      ⚠️ Skipping: Download failed.")
 
     if processed_count == 0:
-        print("💤 No tasks found.")
+        print("💤 No tasks found. Exiting cleanly.")
     else:
         print(f"🎉 Job Done! Uploads in this cycle: {processed_count}")
 
-# =======================================================
-# 🔄 AUTOMATION LOOP (RUNS EVERY 5 MINUTES)
-# =======================================================
-
-def run_continuously():
-    print("\n🚀 BOT IS NOW IN AUTO-PILOT MODE (Checking every 5 mins)...")
-    print("Press Ctrl+C to stop manually.\n")
-    
-    while True:
-        try:
-            start_bot()
-            print("\n💤 Sleeping for 5 minutes... (Next check soon)")
-            time.sleep(300)  # 300 seconds = 5 Minutes
-        except Exception as e:
-            print(f"❌ Crash prevented: {e}")
-            time.sleep(60)
-
 if __name__ == "__main__":
-    run_continuously()
+    start_bot()
