@@ -10,26 +10,51 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 # =======================================================
-# 💎 CONFIGURATION (FINAL)
+# 💎 CONFIGURATION (IG + FB IDs)
 # =======================================================
 
+# 1. AUTH TOKEN
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 👇 Tamaru Dropshipping Sheet ID (Logs mathi malealu)
-DROPSHIPPING_SHEET_ID = "1lrn-plbxc7w4wHBLYoCfP_UYIP6EVJbj79IdBUP5sgs"
-
-# 👇 TAMARA BADHA BRAND IDS
+# 2. BRAND DATABASE
 BRAND_CONFIG = {
-    "URBAN GLINT": { "ig_id": "17841479492205083", "fb_id": "892844607248221" },
-    "GRAND ORBIT": { "ig_id": "17841479516066757", "fb_id": "817698004771102" },
-    "ROYAL NEXUS": { "ig_id": "17841479056452004", "fb_id": "854486334423509" },
-    "LUXIVIBE": { "ig_id": "17841479492205083", "fb_id": "777935382078740" },
-    "DIAMOND DICE": { "ig_id": "17841478369307404", "fb_id": "873607589175898" },
-    "PEARL VERSE": { "ig_id": "17841478822408000", "fb_id": "927694300421135" },
-    "OPUS ELITE": { "ig_id": "17841479493645419", "fb_id": "938320336026787" },
-    # Ahiya bija accounts add kari shako cho...
+    "PEARL VERSE": { 
+        "ig_id": "17841478822408000", 
+        "fb_id": "927694300421135" 
+    },
+    "DIAMOND DICE": { 
+        "ig_id": "17841478369307404", 
+        "fb_id": "873607589175898" 
+    },
+    "EMERALD EDGE": { 
+        "ig_id": "AHIYA_SACHU_IG_ID_NAKHO",  # <--- Jyaare male tyare nakhjo
+        "fb_id": "929305353594436" 
+    },
+    "URBAN GLINT": { 
+        "ig_id": "17841479492205083", 
+        "fb_id": "892844607248221" 
+    },
+    "LUXIVIBE": { 
+        "ig_id": "17841479492205083", 
+        "fb_id": "777935382078740" 
+    },
+    "GRAND ORBIT": { 
+        "ig_id": "17841479516066757", 
+        "fb_id": "817698004771102" 
+    },
+    "OPUS ELITE": { 
+        "ig_id": "17841479493645419", 
+        "fb_id": "938320336026787" 
+    },
+    "ROYAL NEXUS": { 
+        "ig_id": "17841479056452004", 
+        "fb_id": "854486334423509" 
+    }
 }
 
+# 3. SHEET SETTINGS
+# Content Sheet ID (Fixed)
+SPREADSHEET_ID = "1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 # =======================================================
@@ -37,7 +62,6 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapi
 # =======================================================
 
 def get_ist_time():
-    # Server UTC ma hoy, apanene India Time (+5:30) joie
     utc_now = datetime.utcnow()
     ist_now = utc_now + timedelta(hours=5, minutes=30)
     return ist_now
@@ -46,60 +70,81 @@ def is_time_to_post(sheet_date_str, sheet_time_str):
     try:
         ist_now = get_ist_time()
         
-        # Space safai (Bhul thi " 9:00 AM " lakhyu hoy to chale)
-        date_clean = sheet_date_str.strip()
-        time_clean = sheet_time_str.strip().upper() # AM/PM ne Upper case kare
+        # Clean Inputs
+        date_clean = str(sheet_date_str).strip()
+        time_clean = str(sheet_time_str).strip().upper() # AM/PM Uppercase
         
+        if not date_clean or not time_clean:
+            return False
+
         full_time_str = f"{date_clean} {time_clean}"
         
-        # 👇 MAGIC: Have robot banne format samjse (Space hoy ke na hoy)
-        # Try 1: "9:15 AM" (Vache space hoy)
+        # 👇 AM/PM Logic (With or Without Space)
         try:
+            # Try 1: "20/12/2025 9:15 AM"
             scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %I:%M %p")
         except ValueError:
-            # Try 2: "9:15AM" (Vache space na hoy)
-            scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %I:%M%p")
+            try:
+                # Try 2: "20/12/2025 9:15AM"
+                scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %I:%M%p")
+            except ValueError:
+                # Fallback for 24h format just in case
+                scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %H:%M")
 
-        print(f"      🕒 Scheduled: {scheduled_dt} | Current IST: {ist_now.strftime('%Y-%m-%d %H:%M')}")
+        print(f"      🕒 Scheduled: {scheduled_dt} | Current IST: {ist_now.strftime('%d/%m/%Y %H:%M')}")
 
-        # Compare logic
         if ist_now >= scheduled_dt:
-            return True # Time Thai Gayo!
+            return True 
         else:
-            return False # Haju vaar che
-            
+            return False 
     except ValueError:
-        print(f"      ⚠️ Date/Time Format Error! (Use: 20/12/2025 and 9:15 AM)")
-        return False
+        print(f"      ⚠️ Date/Time Skipped or Invalid (Use: 20/12/2025 & 2:30 PM)")
+        return False 
 
 # =======================================================
-# ⚙️ SYSTEM CORE
+# ⚙️ SYSTEM CORE (SECURE CONNECT)
 # =======================================================
+
+def get_credentials():
+    creds_json = os.environ.get("GCP_CREDENTIALS") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    if creds_json:
+        creds_dict = json.loads(creds_json)
+        return Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+    elif os.path.exists("gkey.json"):
+        return Credentials.from_service_account_file("gkey.json", scopes=SCOPES)
+    return None
 
 def get_services():
-    creds_json = os.environ.get("GCP_CREDENTIALS")
-    if not creds_json: return None, None
+    creds = get_credentials()
+    if not creds: return None, None
+    client = gspread.authorize(creds)
+    
+    # Use ID directly to avoid confusion
     try:
-        creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=SCOPES)
-        client = gspread.authorize(creds)
-        
-        # Dropshipping Sheet Open kare che
-        sheet = client.open_by_key(DROPSHIPPING_SHEET_ID).sheet1
-        
-        drive_service = build('drive', 'v3', credentials=creds)
-        return sheet, drive_service
-    except Exception as e:
-        print(f"❌ Connection Error: {e}")
-        return None, None
+        sheet = client.open_by_key(SPREADSHEET_ID).sheet1
+        print("✅ Sheet Connected via ID.")
+    except:
+        print("⚠️ ID failed, trying by name 'Content'...")
+        sheet = client.open("Content").sheet1
+
+    drive_service = build('drive', 'v3', credentials=creds)
+    return sheet, drive_service
+
+# =======================================================
+# 🔧 UPLOAD FUNCTIONS (IG & FB)
+# =======================================================
 
 def download_video_securely(drive_service, drive_url):
-    print("      ⬇️ Downloading video...")
-    temp_filename = "temp_drop_video.mp4"
+    print("      ⬇️ Downloading video securely via API...")
+    temp_filename = "temp_upload_video.mp4"
     if os.path.exists(temp_filename): os.remove(temp_filename)
+
     file_id = None
     if "/d/" in drive_url: file_id = drive_url.split('/d/')[1].split('/')[0]
     elif "id=" in drive_url: file_id = drive_url.split('id=')[1].split('&')[0]
+    
     if not file_id: return None
+
     try:
         request = drive_service.files().get_media(fileId=file_id)
         fh = io.FileIO(temp_filename, 'wb')
@@ -107,109 +152,164 @@ def download_video_securely(drive_service, drive_url):
         done = False
         while done is False: status, done = downloader.next_chunk()
         return temp_filename
-    except: return None
+    except Exception as e:
+        print(f"      ❌ Download Error: {e}")
+        return None
 
-def upload_to_instagram(ig_id, file_path, caption):
-    print(f"      📸 Uploading to Instagram...")
-    if not ig_id: return False
+def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
+    print(f"      📸 Instagram Upload ({brand_name})...")
+    if not ig_user_id or "AHIYA" in ig_user_id: 
+        print("      ⚠️ IG ID Invalid/Missing.")
+        return False
+    
     domain = "https://graph.facebook.com/v19.0"
     try:
-        url = f"{domain}/{ig_id}/media"
+        # Init
+        url_init = f"{domain}/{ig_user_id}/media"
         params = { "upload_type": "resumable", "media_type": "REELS", "caption": caption, "access_token": IG_ACCESS_TOKEN }
-        init = requests.post(url, params=params).json()
-        if "uri" not in init: return False
-        with open(file_path, "rb") as f:
-            headers = { "Authorization": f"OAuth {IG_ACCESS_TOKEN}", "offset": "0", "file_size": str(os.path.getsize(file_path)) }
-            requests.post(init["uri"], data=f, headers=headers)
-        time.sleep(60)
-        pub = requests.post(f"{domain}/{ig_id}/media_publish", params={"creation_id": init["id"], "access_token": IG_ACCESS_TOKEN})
-        return "id" in pub.json()
-    except: return False
+        r_init = requests.post(url_init, params=params)
+        data_init = r_init.json()
+        
+        if "id" not in data_init: return False
+        upload_uri = data_init["uri"]
+        container_id = data_init["id"]
 
-def upload_to_facebook(fb_id, file_path, caption):
-    print(f"      📘 Uploading to Facebook...")
-    if not fb_id: return False
-    try:
-        url = f"https://graph.facebook.com/v19.0/{fb_id}/videos"
-        params = { "description": caption, "access_token": IG_ACCESS_TOKEN }
+        # Upload
+        file_size = os.path.getsize(file_path)
         with open(file_path, "rb") as f:
-            r = requests.post(url, params=params, files={"source": f})
-        return "id" in r.json()
-    except: return False
+            headers = { "Authorization": f"OAuth {IG_ACCESS_TOKEN}", "offset": "0", "file_size": str(file_size) }
+            r_upload = requests.post(upload_uri, data=f, headers=headers)
+        
+        if r_upload.status_code != 200: return False
+
+        # Publish
+        print("      ⏳ Processing IG (60s)...")
+        time.sleep(60)
+        url_pub = f"{domain}/{ig_user_id}/media_publish"
+        r_pub = requests.post(url_pub, params={"creation_id": container_id, "access_token": IG_ACCESS_TOKEN})
+        
+        if "id" in r_pub.json():
+            print(f"      ✅ IG Published: {r_pub.json()['id']}")
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"      ❌ IG Error: {e}")
+        return False
+
+def upload_to_facebook(brand_name, fb_page_id, file_path, caption):
+    """Uploads video directly to Facebook Page"""
+    print(f"      📘 Facebook Upload ({brand_name})...")
+    
+    if not fb_page_id:
+        print("      ⚠️ No FB ID found.")
+        return False
+        
+    url = f"https://graph.facebook.com/v19.0/{fb_page_id}/videos"
+    
+    try:
+        # FB Direct Upload (Simpler than IG)
+        params = {
+            "description": caption,
+            "access_token": IG_ACCESS_TOKEN
+        }
+        
+        with open(file_path, "rb") as f:
+            files = {"source": f}
+            r = requests.post(url, params=params, files=files)
+            
+        data = r.json()
+        
+        if "id" in data:
+            print(f"      ✅ FB Published: {data['id']}")
+            return True
+        else:
+            print(f"      ❌ FB Failed: {data}")
+            return False
+            
+    except Exception as e:
+        print(f"      ❌ FB Exception: {e}")
+        return False
 
 # =======================================================
-# 🚀 MAIN EXECUTION (SMART AM/PM MODE)
+# 🚀 MAIN EXECUTION (SMART MODE)
 # =======================================================
 
 def start_bot():
     print("-" * 50)
-    print(f"⏰ DROPSHIPPING SMART-BOT STARTED (IST + AM/PM)...")
+    print(f"⏰ CONTENT SMART-BOT STARTED (IST + AM/PM)...")
     
     sheet, drive_service = get_services()
-    if not sheet: return
+    if not sheet or not drive_service: return
 
     try:
         records = sheet.get_all_records()
         headers = sheet.row_values(1)
         try: col_status = headers.index("Status") + 1
-        except: col_status = 12 
-    except: return
+        except: col_status = 5
+    except Exception as e:
+        print(f"❌ Error Reading Sheet: {e}")
+        return
 
-    count = 0
+    processed_count = 0
 
     for i, row in enumerate(records, start=2):
-        status = str(row.get("Status", "")).strip()
+        brand = str(row.get("Brand_Name") or row.get("Account_Name") or row.get("Account Name", "")).strip().upper()
+        status = str(row.get("Status", "")).strip().upper()
         
-        # Pending hoy toj check karvanu
-        if status == "Pending":
-            brand = str(row.get("Account Name", "")).strip().upper()
-            
-            # 👇 NEW: Check Time & Date (AM/PM)
-            sheet_date = str(row.get("Date", "")).strip() 
+        if status == "PENDING":
+            # 👇 SUDHARO: Have 'Schedule_Date' vaanchse (Tamari sheet mujab)
+            sheet_date = str(row.get("Schedule_Date", "")).strip()
             sheet_time = str(row.get("Schedule_Time", "")).strip()
             
-            print(f"\n👉 Checking Row {i} for {brand}...")
-
+            print(f"\n👉 Checking Row {i}: {row.get('Title_Hook') or row.get('Title')} | Brand: {brand}")
+            
+            # Jo Time Thai Gayo Hoy TO J Upload Karo
             if is_time_to_post(sheet_date, sheet_time):
-                # Time thai gayo che!
+                
                 if brand in BRAND_CONFIG:
+                    
+                    # IDs
                     ig_id = BRAND_CONFIG[brand].get("ig_id")
                     fb_id = BRAND_CONFIG[brand].get("fb_id")
-                    platform = str(row.get("Platform", "")).strip()
                     
-                    video_url = row.get("Video_Drive_Link", "")
-                    caption_text = row.get("Caption", "")
-                    hashtags = row.get("Hastag", "")
-                    final_caption = f"{caption_text}\n.\n{hashtags}"
+                    video_url = row.get("Video_URL") or row.get("Video Link", "")
+                    title = row.get("Title_Hook") or row.get("Title", "")
+                    hashtags = row.get("Caption_Hashtags") or row.get("Hashtags", "")
+                    caption = f"{title}\n.\n{hashtags}"
                     
                     local_file = download_video_securely(drive_service, video_url)
                     
                     if local_file:
-                        ig_success = False
-                        fb_success = False
-
-                        if "Instagram" in platform:
-                            ig_success = upload_to_instagram(ig_id, local_file, final_caption)
-                        if "Facebook" in platform:
-                            fb_success = upload_to_facebook(fb_id, local_file, final_caption)
+                        # 1. Try Instagram
+                        ig_success = upload_to_instagram_resumable(brand, ig_id, local_file, caption)
                         
+                        # 2. Try Facebook
+                        fb_success = upload_to_facebook(brand, fb_id, local_file, caption)
+
+                        # Cleanup
                         if os.path.exists(local_file): os.remove(local_file)
 
+                        # Update Sheet if AT LEAST ONE succeeded
                         if ig_success or fb_success:
-                            sheet.update_cell(i, col_status, "POSTED")
-                            print(f"      ✅ POSTED SUCCESSFULLY!")
-                            count += 1
-                            time.sleep(10)
-                else:
-                    print(f"      ⚠️ Brand '{brand}' Config ma nathi!")
+                            final_status = "POSTED"
+                            if ig_success and fb_success: final_status = "POSTED_BOTH"
+                            elif ig_success: final_status = "POSTED_IG_ONLY"
+                            elif fb_success: final_status = "POSTED_FB_ONLY"
+                            
+                            sheet.update_cell(i, col_status, final_status)
+                            print(f"      📝 Sheet Updated: {final_status}")
+                            processed_count += 1
+                            time.sleep(10) # Safety Pause
+                    else:
+                        print("      ⚠️ Skipping: Download failed.")
             else:
-                # Time nathi thayo
-                print(f"      ⏳ WAIT: Haju time nathi thayo ({sheet_time}).")
+                print(f"      ⏳ WAIT: Time nathi thayo ({sheet_time}).")
 
-    if count == 0:
-        print("\n💤 No posts due right now.")
+    if processed_count == 0:
+        print("💤 No posts due right now.")
     else:
-        print(f"🎉 Processed {count} videos.")
+        print(f"🎉 Job Done! Uploads in this cycle: {processed_count}")
 
 if __name__ == "__main__":
     start_bot()
