@@ -34,7 +34,7 @@ BRAND_CONFIG = {
         "fb_id": "854486334423509" 
     },
     "LUXIVIBE": { 
-        "ig_id": "17841478140648372",  # ✅ Fixed (Saachu ID)
+        "ig_id": "17841478140648372", 
         "fb_id": "777935382078740" 
     },
     "DIAMOND DICE": { 
@@ -63,9 +63,6 @@ def get_ist_time():
     return ist_now
 
 def check_time_and_wait(sheet_date_str, sheet_time_str):
-    """
-    Checks time. If < 5 mins remain, it WAITS (Sleeps).
-    """
     try:
         ist_now = get_ist_time()
         
@@ -92,18 +89,13 @@ def check_time_and_wait(sheet_date_str, sheet_time_str):
         
         print(f"      🕒 Scheduled: {scheduled_dt.strftime('%H:%M')} | Now: {ist_now.strftime('%H:%M')} | Gap: {int(time_diff)}s")
 
-        # LOGIC 1: Time Thai Gayo Che (Already Late or Exact)
         if time_diff <= 0:
             return True 
-        
-        # LOGIC 2: SNIPER WAIT (Within 5 Mins)
         elif 0 < time_diff <= 300:
             print(f"      👀 TARGET LOCKED! Waiting {int(time_diff)}s to hit exact time...")
             time.sleep(time_diff + 2) 
             print("      🔫 BOOM! Exact Time. Uploading...")
             return True
-            
-        # LOGIC 3: Too Early
         else:
             print(f"      💤 Too early. Sleeping.")
             return False
@@ -113,7 +105,7 @@ def check_time_and_wait(sheet_date_str, sheet_time_str):
         return False
 
 # =======================================================
-# ⚙️ SYSTEM CORE
+# ⚙️ SYSTEM CORE & ANALYTICS
 # =======================================================
 
 def get_services():
@@ -122,20 +114,26 @@ def get_services():
     try:
         creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=SCOPES)
         client = gspread.authorize(creds)
-        
-        # Open Dropshipping Sheet
         try:
             sheet = client.open_by_key(DROPSHIPPING_SHEET_ID).sheet1
             print("✅ Dropshipping Sheet Connected.")
         except:
             print("❌ Sheet ID Invalid.")
             return None, None
-
         drive_service = build('drive', 'v3', credentials=creds)
         return sheet, drive_service
     except Exception as e:
         print(f"❌ Connection Error: {e}")
         return None, None
+
+def get_facebook_metrics(video_id):
+    """Fetches Likes for FB Video"""
+    try:
+        url = f"https://graph.facebook.com/v19.0/{video_id}?fields=likes.summary(true)&access_token={IG_ACCESS_TOKEN}"
+        r = requests.get(url).json()
+        likes = r.get("likes", {}).get("summary", {}).get("total_count", 0)
+        return likes
+    except: return 0
 
 def download_video_securely(drive_service, drive_url):
     print("      ⬇️ Downloading video...")
@@ -154,35 +152,65 @@ def download_video_securely(drive_service, drive_url):
         return temp_filename
     except: return None
 
+# =======================================================
+# 🔧 UPLOAD FUNCTIONS (WITH TIMER & LINK)
+# =======================================================
+
 def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
     print(f"      📸 Instagram Upload ({brand_name})...")
+    start_t = time.time()
     if not ig_user_id: 
         print(f"      ⚠️ No IG ID for {brand_name}")
-        return False
+        return False, "", 0
+    
     domain = "https://graph.facebook.com/v19.0"
     try:
         url = f"{domain}/{ig_user_id}/media"
         params = { "upload_type": "resumable", "media_type": "REELS", "caption": caption, "access_token": IG_ACCESS_TOKEN }
         init = requests.post(url, params=params).json()
-        if "uri" not in init: return False
+        
+        if "uri" not in init: return False, "", 0
+        
         with open(file_path, "rb") as f:
             headers = { "Authorization": f"OAuth {IG_ACCESS_TOKEN}", "offset": "0", "file_size": str(os.path.getsize(file_path)) }
             requests.post(init["uri"], data=f, headers=headers)
+        
         time.sleep(60)
-        pub = requests.post(f"{domain}/{ig_user_id}/media_publish", params={"creation_id": init["id"], "access_token": IG_ACCESS_TOKEN})
-        return "id" in pub.json()
-    except: return False
+        pub = requests.post(f"{domain}/{ig_user_id}/media_publish", params={"creation_id": init["id"], "access_token": IG_ACCESS_TOKEN}).json()
+        
+        end_t = time.time()
+        duration = int(end_t - start_t)
+        
+        if "id" in pub:
+            try:
+                # Fetch Shortcode for Link
+                r_get = requests.get(f"{domain}/{pub['id']}?fields=shortcode&access_token={IG_ACCESS_TOKEN}").json()
+                shortcode = r_get.get("shortcode", "")
+                link = f"https://www.instagram.com/reel/{shortcode}/" if shortcode else f"ID:{pub['id']}"
+            except: link = "Link Error"
+            return True, link, duration
+        return False, "", 0
+    except: return False, "", 0
 
 def upload_to_facebook(brand_name, fb_page_id, file_path, caption):
     print(f"      📘 Facebook Upload ({brand_name})...")
-    if not fb_page_id: return False
+    start_t = time.time()
+    if not fb_page_id: return False, "", 0
+    
     try:
         url = f"https://graph.facebook.com/v19.0/{fb_page_id}/videos"
         params = { "description": caption, "access_token": IG_ACCESS_TOKEN }
         with open(file_path, "rb") as f:
-            r = requests.post(url, params=params, files={"source": f})
-        return "id" in r.json()
-    except: return False
+            r = requests.post(url, params=params, files={"source": f}).json()
+        
+        end_t = time.time()
+        duration = int(end_t - start_t)
+        
+        if "id" in r:
+            link = f"https://www.facebook.com/{fb_page_id}/videos/{r['id']}/"
+            return True, link, duration
+        return False, "", 0
+    except: return False, "", 0
 
 # =======================================================
 # 🚀 MAIN EXECUTION
@@ -190,7 +218,7 @@ def upload_to_facebook(brand_name, fb_page_id, file_path, caption):
 
 def start_bot():
     print("-" * 50)
-    print(f"⏰ DROPSHIPPING SNIPER-BOT STARTED...")
+    print(f"⏰ DROPSHIPPING SUPER-BOT STARTED...")
     
     sheet, drive_service = get_services()
     if not sheet: return
@@ -198,24 +226,33 @@ def start_bot():
     try:
         records = sheet.get_all_records()
         headers = sheet.row_values(1)
+        # Dynamic Column Finding
         try: col_status = headers.index("Status") + 1
         except: col_status = 12 
+        try: col_link = headers.index("Link") + 1
+        except: col_link = 0
+        try: col_duration = headers.index("Upload_Duration") + 1
+        except: col_duration = 0
+        try: col_views = headers.index("Views") + 1
+        except: col_views = 0
+        try: col_likes = headers.index("Likes") + 1
+        except: col_likes = 0
+        
     except: return
 
     count = 0
 
+    # PART 1: UPLOAD
     for i, row in enumerate(records, start=2):
         status = str(row.get("Status", "")).strip()
         
         if status == "Pending":
-            # Dropshipping uses 'Date' column
             sheet_date = str(row.get("Date", "")).strip()
             sheet_time = str(row.get("Schedule_Time", "")).strip()
             brand = str(row.get("Account Name", "")).strip().upper()
 
             print(f"\n👉 Checking Row {i}: {brand}")
 
-            # SNIPER CHECK
             if check_time_and_wait(sheet_date, sheet_time):
                 if brand in BRAND_CONFIG:
                     ig_id = BRAND_CONFIG[brand].get("ig_id")
@@ -230,26 +267,65 @@ def start_bot():
                     local_file = download_video_securely(drive_service, video_url)
                     
                     if local_file:
-                        ig_success = False
-                        fb_success = False
+                        success = False
+                        final_link = ""
+                        duration = 0
 
                         if "Instagram" in platform:
-                            ig_success = upload_to_instagram_resumable(brand, ig_id, local_file, final_caption)
+                            s, l, d = upload_to_instagram_resumable(brand, ig_id, local_file, final_caption)
+                            if s: 
+                                success = True
+                                final_link = l
+                                duration = d
+                                
                         if "Facebook" in platform:
-                            fb_success = upload_to_facebook(brand, fb_id, local_file, final_caption)
-                        
+                            s, l, d = upload_to_facebook(brand, fb_id, local_file, final_caption)
+                            if s:
+                                success = True
+                                final_link = l # If both, FB link overwrites IG link in sheet logic
+                                duration = d
+
                         if os.path.exists(local_file): os.remove(local_file)
 
-                        if ig_success or fb_success:
+                        if success:
                             sheet.update_cell(i, col_status, "POSTED")
-                            print(f"      ✅ Success!")
+                            
+                            if col_link > 0: 
+                                sheet.update_cell(i, col_link, final_link)
+                            if col_duration > 0: 
+                                sheet.update_cell(i, col_duration, f"{duration} sec")
+                                
+                            print(f"      ✅ Success! Link: {final_link}")
                             count += 1
                             time.sleep(10)
             else:
                 pass 
 
+    # PART 2: ANALYTICS (Last 20)
+    print("\n📊 Checking Analytics...")
+    records = sheet.get_all_records()
+    check_limit = 0
+    for i in range(len(records), 1, -1):
+        if check_limit >= 20: break
+        
+        row = records[i-2]
+        status = str(row.get("Status", "")).strip()
+        link = str(row.get("Link", "")).strip()
+        
+        if status == "POSTED" and link != "":
+            likes = 0
+            if "facebook.com" in link:
+                try: vid_id = link.split("/videos/")[1].replace("/","")
+                except: vid_id = ""
+                if vid_id: likes = get_facebook_metrics(vid_id)
+            
+            if likes > 0:
+                if col_likes > 0: sheet.update_cell(i, col_likes, likes)
+                print(f"   🔄 Updated Likes Row {i}: {likes}")
+            check_limit += 1
+
     if count == 0:
-        print("💤 No posts ready.")
+        print("💤 No new posts. Analytics updated.")
     else:
         print(f"🎉 Processed {count} videos.")
 
