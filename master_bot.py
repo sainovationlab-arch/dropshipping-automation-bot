@@ -63,6 +63,9 @@ def get_ist_time():
     return ist_now
 
 def check_time_and_wait(sheet_date_str, sheet_time_str):
+    """
+    Checks time. If < 5 mins remain, it WAITS (Sleeps).
+    """
     try:
         ist_now = get_ist_time()
         
@@ -89,13 +92,18 @@ def check_time_and_wait(sheet_date_str, sheet_time_str):
         
         print(f"      🕒 Scheduled: {scheduled_dt.strftime('%H:%M')} | Now: {ist_now.strftime('%H:%M')} | Gap: {int(time_diff)}s")
 
+        # LOGIC 1: Time Thai Gayo Che (Already Late or Exact)
         if time_diff <= 0:
             return True 
+        
+        # LOGIC 2: SNIPER WAIT (Within 5 Mins)
         elif 0 < time_diff <= 300:
             print(f"      👀 TARGET LOCKED! Waiting {int(time_diff)}s to hit exact time...")
             time.sleep(time_diff + 2) 
             print("      🔫 BOOM! Exact Time. Uploading...")
             return True
+            
+        # LOGIC 3: Too Early
         else:
             print(f"      💤 Too early. Sleeping.")
             return False
@@ -213,7 +221,7 @@ def upload_to_facebook(brand_name, fb_page_id, file_path, caption):
     except: return False, "", 0
 
 # =======================================================
-# 🚀 MAIN EXECUTION
+# 🚀 MAIN EXECUTION (WITH FULL DATA ENTRY)
 # =======================================================
 
 def start_bot():
@@ -260,9 +268,22 @@ def start_bot():
                     platform = str(row.get("Platform", "")).strip()
                     
                     video_url = row.get("Video_Drive_Link", "")
-                    caption_text = row.get("Caption", "")
-                    hashtags = row.get("Hastag", "")
-                    final_caption = f"{caption_text}\n.\n{hashtags}"
+                    
+                    # ✅ FETCH FULL DETAILS (Title + Desc + Caption + Hashtags)
+                    title = str(row.get("Title", "")).strip()
+                    desc = str(row.get("Description", "")).strip()
+                    caption_text = str(row.get("Caption", "")).strip()
+                    hashtags = str(row.get("Hastag", "")).strip()
+                    
+                    # Construct Final Caption intelligently
+                    # It will only add parts that exist in the sheet
+                    parts = []
+                    if title: parts.append(title)
+                    if desc: parts.append(desc)
+                    if caption_text: parts.append(caption_text)
+                    if hashtags: parts.append(f".\n{hashtags}")
+                    
+                    final_caption = "\n\n".join(parts)
                     
                     local_file = download_video_securely(drive_service, video_url)
                     
