@@ -1,149 +1,174 @@
 import os
 import time
-import datetime
-import traceback
-
+import json
+import requests
+import io
+import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
-# ==============================
-# CONFIG
-# ==============================
+# =======================================================
+# 💎 CONFIGURATION (DROPSHIPPING IDs)
+# =======================================================
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-SPREADSHEET_ID = os.environ.get("SHEET_ID")
-SERVICE_ACCOUNT_INFO = os.environ.get("GCP_CREDENTIALS_JSON")
+IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-CHECK_INTERVAL_SECONDS = 300  # 5 minutes
+# 👉 TAMARE AHIYA SACHA ID NAKHVA PADSE (Sheet na naam mujab)
+BRAND_CONFIG = {
+    "URBAN GLINT": { "ig_id": "17841479492205083", "fb_id": "892844607248221" },
+    "GRAND ORBIT": { "ig_id": "17841479516066757", "fb_id": "817698004771102" },
+    "ROYAL NEXUS": { "ig_id": "17841479056452004", "fb_id": "854486334423509" },
+    "LUXIVIBE": { "ig_id": "17841479492205083", "fb_id": "777935382078740" },
+    "DIAMOND DICE": { "ig_id": "17841478369307404", "fb_id": "873607589175898" },
+    # ... Bija badha accounts ahiya add karva ...
+}
 
-# ==============================
-# AUTH
-# ==============================
+SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
-creds = Credentials.from_service_account_info(
-    eval(SERVICE_ACCOUNT_INFO),
-    scopes=SCOPES
-)
-sheets_service = build("sheets", "v4", credentials=creds)
+# =======================================================
+# ⚙️ SYSTEM CORE
+# =======================================================
 
-# ==============================
-# HELPERS
-# ==============================
+def get_services():
+    creds_json = os.environ.get("GCP_CREDENTIALS")
+    if not creds_json: return None, None
+    
+    creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=SCOPES)
+    client = gspread.authorize(creds)
+    
+    # 👇 Sheet Name Analysis mujab 'Dropshiping' (Single P)
+    try:
+        sheet = client.open("Dropshiping").sheet1 
+    except:
+        # Jo naam thi na male to ID thi try karse
+        sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
-def now_india():
-    return datetime.datetime.now()
+    drive_service = build('drive', 'v3', credentials=creds)
+    return sheet, drive_service
 
-def get_sheet_data():
-    sheet = sheets_service.spreadsheets()
-    result = sheet.values().get(
-        spreadsheetId=SPREADSHEET_ID,
-        range="Pending_Uploads"
-    ).execute()
-    return result.get("values", [])
+# =======================================================
+# 🔧 UPLOAD FUNCTIONS
+# =======================================================
 
-def update_cell(row, col, value):
-    sheets_service.spreadsheets().values().update(
-        spreadsheetId=SPREADSHEET_ID,
-        range=f"Pending_Uploads!{col}{row}",
-        valueInputOption="RAW",
-        body={"values": [[value]]}
-    ).execute()
+def download_video_securely(drive_service, drive_url):
+    print("      ⬇️ Downloading video...")
+    temp_filename = "temp_drop_video.mp4"
+    if os.path.exists(temp_filename): os.remove(temp_filename)
 
-# ==============================
-# PLATFORM UPLOAD STUBS
-# ==============================
+    file_id = None
+    if "/d/" in drive_url: file_id = drive_url.split('/d/')[1].split('/')[0]
+    elif "id=" in drive_url: file_id = drive_url.split('id=')[1].split('&')[0]
+    
+    if not file_id: return None
 
-def upload_video(platform, video_url, title, description, hashtags):
-    """
-    REAL upload logic already exists in your project.
-    This wrapper only measures duration.
-    """
-    start = time.time()
+    try:
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = io.FileIO(temp_filename, 'wb')
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while done is False: status, done = downloader.next_chunk()
+        return temp_filename
+    except: return None
 
-    # ---- EXISTING UPLOAD LOGIC RUNS HERE ----
-    time.sleep(2)  # simulate upload time
-    live_url = f"https://{platform}.com/live_post_example"
-    # ----------------------------------------
+def upload_to_instagram(ig_id, file_path, caption):
+    print(f"      📸 Uploading to Instagram...")
+    if not ig_id: return False
+    domain = "https://graph.facebook.com/v19.0"
+    try:
+        # Init
+        url = f"{domain}/{ig_id}/media"
+        params = { "upload_type": "resumable", "media_type": "REELS", "caption": caption, "access_token": IG_ACCESS_TOKEN }
+        init = requests.post(url, params=params).json()
+        if "uri" not in init: return False
+        
+        # Upload
+        with open(file_path, "rb") as f:
+            headers = { "Authorization": f"OAuth {IG_ACCESS_TOKEN}", "offset": "0", "file_size": str(os.path.getsize(file_path)) }
+            requests.post(init["uri"], data=f, headers=headers)
+        
+        # Publish
+        time.sleep(60)
+        pub = requests.post(f"{domain}/{ig_id}/media_publish", params={"creation_id": init["id"], "access_token": IG_ACCESS_TOKEN})
+        return "id" in pub.json()
+    except: return False
 
-    duration = int(time.time() - start)
-    return live_url, duration
+def upload_to_facebook(fb_id, file_path, caption):
+    print(f"      📘 Uploading to Facebook...")
+    if not fb_id: return False
+    try:
+        url = f"https://graph.facebook.com/v19.0/{fb_id}/videos"
+        params = { "description": caption, "access_token": IG_ACCESS_TOKEN }
+        with open(file_path, "rb") as f:
+            r = requests.post(url, params=params, files={"source": f})
+        return "id" in r.json()
+    except: return False
 
-# ==============================
-# ANALYTICS FETCHERS
-# ==============================
+# =======================================================
+# 🚀 MAIN EXECUTION (Matches Your Sheet Headers)
+# =======================================================
 
-def fetch_views_likes(platform, live_url):
-    # Stub – replace with your real API logic
-    return {
-        "views": 100,
-        "likes": 12
-    }
+def start_bot():
+    print("-" * 50)
+    print(f"⏰ DROPSHIPPING BOT STARTED...")
+    
+    sheet, drive_service = get_services()
+    if not sheet: return
 
-def fetch_pinterest_analytics(live_url):
-    impressions = 500
-    clicks = 45
-    ctr = round((clicks / impressions) * 100, 2) if impressions else 0
-    return impressions, clicks, ctr
+    try:
+        records = sheet.get_all_records()
+        headers = sheet.row_values(1)
+        # Status column L (index 12 typically)
+        try: col_status = headers.index("Status") + 1
+        except: col_status = 12 
+    except: return
 
-# ==============================
-# MAIN LOGIC
-# ==============================
+    count = 0
 
-def main():
-    rows = get_sheet_data()
-    headers = rows[0]
-    data_rows = rows[1:]
+    for i, row in enumerate(records, start=2):
+        # 👇 SCREENSHOT ANALYSIS VARIABLES
+        brand = str(row.get("Account Name", "")).strip().upper()
+        status = str(row.get("Status", "")).strip()
+        platform = str(row.get("Platform", "")).strip() # Case sensitive rakhyu nathi
+        
+        if status == "Pending": 
+            if brand in BRAND_CONFIG:
+                print(f"\n👉 Processing: {brand} | Platform: {platform}")
+                
+                ig_id = BRAND_CONFIG[brand].get("ig_id")
+                fb_id = BRAND_CONFIG[brand].get("fb_id")
+                
+                # 👇 Headers from your screenshot
+                video_url = row.get("Video_Drive_Link", "")
+                caption_text = row.get("Caption", "")
+                hashtags = row.get("Hastag", "") # Spelling match
+                final_caption = f"{caption_text}\n.\n{hashtags}"
+                
+                local_file = download_video_securely(drive_service, video_url)
+                
+                if local_file:
+                    ig_success = False
+                    fb_success = False
 
-    now = now_india()
+                    # 👇 Platform Logic
+                    if "Instagram" in platform:
+                        ig_success = upload_to_instagram(ig_id, local_file, final_caption)
+                    if "Facebook" in platform:
+                        fb_success = upload_to_facebook(fb_id, local_file, final_caption)
+                    
+                    if os.path.exists(local_file): os.remove(local_file)
 
-    for index, row in enumerate(data_rows, start=2):
-        try:
-            status = row[headers.index("Status")].strip()
-            if status != "PENDING":
-                continue
+                    if ig_success or fb_success:
+                        sheet.update_cell(i, col_status, "POSTED")
+                        print(f"      ✅ Success!")
+                        count += 1
+                        time.sleep(10)
 
-            sheet_date = datetime.datetime.strptime(
-                row[headers.index("Schedule_Date")], "%m-%d-%Y"
-            ).date()
-            sheet_time = datetime.datetime.strptime(
-                row[headers.index("Schedule_Time")], "%I:%M %p"
-            ).time()
-
-            if now.date() != sheet_date or now.time() < sheet_time:
-                continue
-
-            platform = row[headers.index("Platform")]
-            video_url = row[headers.index("Video_Drive_Link")]
-            title = row[headers.index("Title_Hook")]
-            description = row[headers.index("Description")]
-            hashtags = row[headers.index("Caption_Hashtag")]
-
-            live_url, duration = upload_video(
-                platform, video_url, title, description, hashtags
-            )
-
-            update_cell(index, "L", live_url)
-            update_cell(index, "M", duration)
-            update_cell(index, "K", "DONE")
-
-            # ===== ANALYTICS =====
-            if platform.lower() == "pinterest":
-                imp, clicks, ctr = fetch_pinterest_analytics(live_url)
-                update_cell(index, "P", imp)
-                update_cell(index, "Q", clicks)
-                update_cell(index, "R", ctr)
-            else:
-                analytics = fetch_views_likes(platform, live_url)
-                update_cell(index, "N", analytics["views"])
-                update_cell(index, "O", analytics["likes"])
-
-        except Exception as e:
-            update_cell(index, "K", "FAILED")
-            print(traceback.format_exc())
-
-# ==============================
-# ENTRY
-# ==============================
+    if count == 0:
+        print("💤 No tasks found. (Check 'Status' column is 'Pending')")
+    else:
+        print(f"🎉 Processed {count} videos.")
 
 if __name__ == "__main__":
-    main()
+    start_bot()
