@@ -343,7 +343,7 @@ def upload_to_youtube(brand_name, file_path, title, description, tags=[]):
 
 def start_bot():
     print("-" * 50)
-    print(f"⏰ SUPER-BOT STARTED (Upload + Analytics)...")
+    print(f"⏰ SUPER-BOT STARTED (Upload + Analytics + Description)...")
     
     sheet, drive_service = get_services()
     if not sheet or not drive_service: return
@@ -389,9 +389,16 @@ def start_bot():
                     fb_id = BRAND_CONFIG[brand].get("fb_id")
                     
                     video_url = row.get("Video_URL") or row.get("Video Link", "")
+                    
+                    # ✅ FETCH ALL DATA (Updated Logic Here)
                     title = row.get("Title_Hook") or row.get("Title", "")
+                    description_text = row.get("Description", "") # Fetch Description
                     hashtags_str = row.get("Caption_Hashtags") or row.get("Hashtags", "")
-                    caption = f"{title}\n.\n{hashtags_str}"
+                    
+                    # ✅ COMBINE EVERYTHING FOR CAPTION
+                    # Format: Title + Description + Hashtags
+                    caption = f"{title}\n\n{description_text}\n.\n{hashtags_str}"
+                    
                     yt_tags = [tag.strip().replace("#", "") for tag in hashtags_str.split() if "#" in tag]
                     
                     local_file = download_video_securely(drive_service, video_url)
@@ -407,6 +414,7 @@ def start_bot():
                         elif "Facebook" in platform:
                             success, final_link, duration = upload_to_facebook(brand, fb_id, local_file, caption)
                         elif "Youtube" in platform:
+                            # YouTube will use title separately and caption as description
                             success, final_link, duration = upload_to_youtube(brand, local_file, title, caption, yt_tags)
 
                         # Cleanup
