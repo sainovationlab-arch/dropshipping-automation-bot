@@ -1,51 +1,37 @@
-name: Master Content Automation Bot
+name: Content Creation Bot (Emerald & Others)
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # Every 5 minutes
+    # ⏰ Content Bot dar 5 minute e check karse
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
+# 👇 AA CONTENT MATE NU GROUP CHE
+concurrency:
+  group: content-creation-production
+  cancel-in-progress: true
+
 jobs:
-  run-bot:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: '3.9'
 
       - name: Install Dependencies
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install requests gspread oauth2client google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client
 
-      - name: Run Master Bot (Scheduler Brain)
+      - name: Run Content Bot
         env:
-          # ===== GOOGLE SHEETS =====
-          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
-          SHEET_CONTENT_URL: ${{ secrets.SHEET_CONTENT_URL }}
-          SHEET_DROPSHIPPING_URL: ${{ secrets.SHEET_DROPSHIPPING_URL }}
-
-          # ===== META / INSTAGRAM =====
           FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
-          INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
-          INSTAGRAM_USER_IDS: ${{ secrets.INSTAGRAM_USER_IDS }}
-
-          # ===== YOUTUBE =====
-          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
-
-          # ===== PINTEREST =====
-          PINTEREST_TOKEN_DIAMOND: ${{ secrets.PINTEREST_TOKEN_DIAMOND }}
-          PINTEREST_TOKEN_EMERALD: ${{ secrets.PINTEREST_TOKEN_EMERALD }}
-          PINTEREST_TOKEN_LUXYTE: ${{ secrets.PINTEREST_TOKEN_LUXYTE }}
-          PINTEREST_TOKEN_OPUS: ${{ secrets.PINTEREST_TOKEN_OPUS }}
-          PINTEREST_TOKEN_PEARL: ${{ secrets.PINTEREST_TOKEN_PEARL }}
-          PINTEREST_TOKEN_ROYAL: ${{ secrets.PINTEREST_TOKEN_ROYAL }}
-          PINTEREST_TOKEN_URBAN: ${{ secrets.PINTEREST_TOKEN_URBAN }}
-
-        run: |
-          python master_bot_final.py
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }} # Content Sheet ID
+        run: python master_bot_final.py
