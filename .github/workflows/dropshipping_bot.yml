@@ -2,11 +2,9 @@ name: Dropshipping Auto Bot (Final)
 
 on:
   schedule:
-    # ⏰ Dar 5 minute e trigger thase
     - cron: '*/5 * * * *'
-  workflow_dispatch:      # Manual trigger button
+  workflow_dispatch:
 
-# 👇 TRAFFIC JAM PREVENTION
 concurrency:
   group: dropshipping-production
   cancel-in-progress: true
@@ -29,9 +27,10 @@ jobs:
         run: |
           pip install requests gspread oauth2client google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client
 
-      - name: Run Automation Bot
+      - name: Run Dropshipping Bot
         env:
           FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-        run: python master_bot_final.py
+        # 👇 HAVE AA FILE RUN THASE
+        run: python master_bot.py
