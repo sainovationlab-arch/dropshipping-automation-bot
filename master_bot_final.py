@@ -173,7 +173,7 @@ def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
         return False
 
 # =======================================================
-# 🚀 MAIN EXECUTION (NO LOOP - FOR GITHUB ACTIONS)
+# 🚀 MAIN EXECUTION (RUN ONCE & EXIT)
 # =======================================================
 
 def start_bot():
@@ -223,7 +223,7 @@ def start_bot():
                         print(f"      📝 Sheet Updated: POSTED")
                         processed_count += 1
                         
-                        # 💡 Safety Pause: Waiting 10 seconds before next post
+                        # Safety Pause: 10 second rukse (spamming rokva)
                         time.sleep(10)
                 else:
                     print("      ⚠️ Skipping: Download failed.")
