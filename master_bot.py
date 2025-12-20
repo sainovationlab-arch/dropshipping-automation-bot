@@ -9,55 +9,59 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 # =======================================================
-# 💎 CONFIGURATION (DROPSHIPPING)
+# 💎 CONFIGURATION
 # =======================================================
 
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 👇 STEP 1 MA JE ID COPY KARYU TE AHINYA NAKHO (AVTARAN CHIHNA NI VACHE)
-DROPSHIPPING_SHEET_ID = "1lrn-plbxc7w4wHBLYOcFP_UYIP6EVJbj79IdBUP5sgs" 
+# 👇 TAMARU SHEET ID (Confirm karjo aa j che)
+DROPSHIPPING_SHEET_ID = "1lrn-plbxc7w4wHBLYOcFP_UYIP6EVJbj79IdBUP5sgs"
 
-# Brand IDs (Tamara Screenshot Mujab)
 BRAND_CONFIG = {
     "URBAN GLINT": { "ig_id": "17841479492205083", "fb_id": "892844607248221" },
     "GRAND ORBIT": { "ig_id": "17841479516066757", "fb_id": "817698004771102" },
     "ROYAL NEXUS": { "ig_id": "17841479056452004", "fb_id": "854486334423509" },
     "LUXIVIBE": { "ig_id": "17841479492205083", "fb_id": "777935382078740" },
     "DIAMOND DICE": { "ig_id": "17841478369307404", "fb_id": "873607589175898" },
-    # Jo bija account hoy to ahiya add kari devana
 }
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 # =======================================================
-# ⚙️ SYSTEM CORE
+# ⚙️ SYSTEM CORE (DIAGNOSTIC MODE)
 # =======================================================
 
 def get_services():
+    print("\n" + "="*50)
+    print("🕵️ CHECKING CREDENTIALS...")
+    
     creds_json = os.environ.get("GCP_CREDENTIALS")
     if not creds_json: 
-        print("❌ GCP Credentials not found!")
+        print("❌ GCP Credentials Not Found!")
         return None, None
     
     try:
-        creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=SCOPES)
+        # 👇 AA JADU CHE: Ahiya saachu email print thase
+        creds_dict = json.loads(creds_json)
+        actual_email = creds_dict.get("client_email", "Unknown")
+        
+        print(f"🔑 BOT IS USING THIS EMAIL:  {actual_email}")
+        print("👉 (Aa Email ne Sheet ma 'Editor' banavo!)")
+        print("="*50 + "\n")
+
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
         client = gspread.authorize(creds)
         
-        # Check if user forgot to paste ID
-        if "PASTE_YOUR_ID_HERE" in DROPSHIPPING_SHEET_ID:
-            print("❌ ERROR: Tame Python code ma Line number 18 par Sheet ID paste nathi karyu!")
-            return None, None
-            
-        # Open Sheet by ID directly (No name confusion)
+        # Open Sheet
         sheet = client.open_by_key(DROPSHIPPING_SHEET_ID).sheet1
-        print("✅ Sheet Connected Successfully!")
+        print("✅ CONNECTION SUCCESSFUL! (Sheet Mali Gai)")
 
         drive_service = build('drive', 'v3', credentials=creds)
         return sheet, drive_service
         
     except Exception as e:
-        print(f"❌ CONNECTION ERROR: {e}")
-        print("👉 Khas Check Karo: Tame 'Share' button dabavi ne Bot nu Email add karyu che?")
+        print(f"❌ ERROR: {e}")
+        print(f"⚠️ Haju pan permission nathi! Upar je '{actual_email}' chapyu te add karo.")
         return None, None
 
 # =======================================================
@@ -128,7 +132,6 @@ def start_bot():
     try:
         records = sheet.get_all_records()
         headers = sheet.row_values(1)
-        # Status column L (index 12 typically in your sheet)
         try: col_status = headers.index("Status") + 1
         except: col_status = 12 
     except Exception as e:
@@ -138,7 +141,6 @@ def start_bot():
     count = 0
 
     for i, row in enumerate(records, start=2):
-        # Using exact headers from your screenshot
         brand = str(row.get("Account Name", "")).strip().upper()
         status = str(row.get("Status", "")).strip()
         platform = str(row.get("Platform", "")).strip()
@@ -150,7 +152,6 @@ def start_bot():
                 ig_id = BRAND_CONFIG[brand].get("ig_id")
                 fb_id = BRAND_CONFIG[brand].get("fb_id")
                 
-                # Reading columns based on your sheet screenshot
                 video_url = row.get("Video_Drive_Link", "")
                 caption_text = row.get("Caption", "")
                 hashtags = row.get("Hastag", "")
@@ -162,7 +163,6 @@ def start_bot():
                     ig_success = False
                     fb_success = False
 
-                    # Check Platform column (Instagram / Facebook)
                     if "Instagram" in platform:
                         ig_success = upload_to_instagram(ig_id, local_file, final_caption)
                     if "Facebook" in platform:
@@ -177,7 +177,7 @@ def start_bot():
                         time.sleep(10)
 
     if count == 0:
-        print("💤 No tasks found. (Status 'Pending' check karjo)")
+        print("💤 No tasks found.")
     else:
         print(f"🎉 Processed {count} videos.")
 
