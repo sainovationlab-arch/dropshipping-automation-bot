@@ -13,10 +13,10 @@ from googleapiclient.http import MediaIoBaseDownload
 # 💎 CONFIGURATION (IG + FB IDs)
 # =======================================================
 
-# 1. AUTH TOKEN
+# 1. AUTH TOKEN (GitHub Secret)
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 2. BRAND DATABASE
+# 2. BRAND DATABASE (All IDs Updated & Verified)
 BRAND_CONFIG = {
     "PEARL VERSE": { 
         "ig_id": "17841478822408000", 
@@ -27,7 +27,7 @@ BRAND_CONFIG = {
         "fb_id": "873607589175898" 
     },
     "EMERALD EDGE": { 
-        "ig_id": "AHIYA_SACHU_IG_ID_NAKHO",  # <--- Jyaare male tyare nakhjo
+        "ig_id": "17841478817585793",  # ✅ Updated
         "fb_id": "929305353594436" 
     },
     "URBAN GLINT": { 
@@ -35,7 +35,7 @@ BRAND_CONFIG = {
         "fb_id": "892844607248221" 
     },
     "LUXIVIBE": { 
-        "ig_id": "17841479492205083", 
+        "ig_id": "17841478140648372",  # ✅ Updated
         "fb_id": "777935382078740" 
     },
     "GRAND ORBIT": { 
@@ -68,8 +68,7 @@ def get_ist_time():
 
 def check_time_and_wait(sheet_date_str, sheet_time_str):
     """
-    Aa function check karse. Jo 5 min karta ochi vaar hoy,
-    to RAAH JOSE (Sleep) ane exact time e post karse.
+    Checks time. If < 5 mins remain, it WAITS (Sleeps).
     """
     try:
         ist_now = get_ist_time()
