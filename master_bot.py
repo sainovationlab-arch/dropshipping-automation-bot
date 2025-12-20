@@ -15,7 +15,7 @@ from googleapiclient.http import MediaIoBaseDownload
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
 # 👇 STEP 1 MA JE ID COPY KARYU TE AHINYA NAKHO (AVTARAN CHIHNA NI VACHE)
-DROPSHIPPING_SHEET_ID = "PASTE_YOUR_ID_HERE" 
+DROPSHIPPING_SHEET_ID = "1lrn-plbxc7w4wHBLYOcFP_UYIP6EVJbj79IdBUP5sgs" 
 
 # Brand IDs (Tamara Screenshot Mujab)
 BRAND_CONFIG = {
