@@ -2,19 +2,20 @@ name: Master Content Automation Bot
 
 on:
   schedule:
-    # ⏰ Dar 30 minute e run thase (Best for avoiding traffic)
-    - cron: '*/30 * * * *'
+    # ⏰ Dar 5 minute e trigger thase
+    - cron: '*/5 * * * *'
   workflow_dispatch:      # Manual trigger button
 
-# 👇 AA SECTION TRAFFIC JAM ROKSHE 👇
+# 👇 AA SECTION TRAFFIC JAM ROKSHE
 concurrency:
   group: production
   cancel-in-progress: true
+# Jo juno bot chalu hase, to te bandh thai jase ane navo chalu thase.
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20  # 20 min thi vadhu koi job nahi chale
+    timeout-minutes: 5  # 5 min thi vadhu koi job nahi chale (Safety)
 
     steps:
       - name: Checkout Code
