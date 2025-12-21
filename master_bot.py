@@ -288,6 +288,7 @@ def start_bot():
                     hashtags = str(row.get("Hastag", "")).strip()
                     
                     # Construct Final Caption intelligently
+                    # It will only add parts that exist in the sheet
                     parts = []
                     if title: parts.append(title)
                     if desc: parts.append(desc)
