@@ -77,20 +77,32 @@ def check_time_and_wait(sheet_date_str, sheet_time_str):
 
         full_time_str = f"{date_clean} {time_clean}"
         
-        # Parse Time (With AM/PM support)
-        try:
-            scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %I:%M %p")
-        except ValueError:
+        # 👇 UPDATED DATE PARSING LOGIC (Handles US & Indian Formats)
+        formats_to_try = [
+            "%d/%m/%Y %I:%M %p",  # 21/12/2025 2:30 PM (Indian)
+            "%m/%d/%Y %I:%M %p",  # 12/21/2025 2:30 PM (US Style - Sheet Default)
+            "%d/%m/%Y %I:%M%p",   # 21/12/2025 2:30PM
+            "%m/%d/%Y %I:%M%p",   # 12/21/2025 2:30PM
+            "%d/%m/%Y %H:%M",     # 24 Hour format
+            "%Y-%m-%d %H:%M:%S"   # ISO Format
+        ]
+        
+        scheduled_dt = None
+        for fmt in formats_to_try:
             try:
-                scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %I:%M%p")
+                scheduled_dt = datetime.strptime(full_time_str, fmt)
+                break # Match found, stop checking
             except ValueError:
-                # Fallback
-                scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %H:%M")
+                continue
+                
+        if not scheduled_dt:
+            print(f"      ⚠️ Date Format Unknown: {full_time_str}")
+            return False
 
         # Time Difference
         time_diff = (scheduled_dt - ist_now).total_seconds()
         
-        print(f"      🕒 Scheduled: {scheduled_dt.strftime('%H:%M')} | Now: {ist_now.strftime('%H:%M')} | Gap: {int(time_diff)}s")
+        print(f"      🕒 Scheduled: {scheduled_dt.strftime('%d/%m %H:%M')} | Now: {ist_now.strftime('%d/%m %H:%M')} | Gap: {int(time_diff)}s")
 
         # LOGIC 1: Time Thai Gayo Che (Already Late or Exact)
         if time_diff <= 0:
@@ -108,8 +120,8 @@ def check_time_and_wait(sheet_date_str, sheet_time_str):
             print(f"      💤 Too early. Sleeping.")
             return False
 
-    except ValueError:
-        print(f"      ⚠️ Date/Time Error.")
+    except Exception as e:
+        print(f"      ⚠️ Date/Time Error: {e}")
         return False
 
 # =======================================================
@@ -276,7 +288,6 @@ def start_bot():
                     hashtags = str(row.get("Hastag", "")).strip()
                     
                     # Construct Final Caption intelligently
-                    # It will only add parts that exist in the sheet
                     parts = []
                     if title: parts.append(title)
                     if desc: parts.append(desc)
