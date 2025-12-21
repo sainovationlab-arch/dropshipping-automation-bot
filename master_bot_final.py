@@ -63,7 +63,7 @@ SPREADSHEET_ID = "1Kdd01UAt5rz-9VYDhjFYL4Dh35gaofLipbsjyl8u8hY"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 # =======================================================
-# 🧠 SNIPER TIME LOGIC (SMART WAIT + AM/PM)
+# 🧠 SNIPER TIME LOGIC (UPDATED FOR ALL DATE FORMATS)
 # =======================================================
 
 def get_ist_time():
@@ -87,19 +87,32 @@ def check_time_and_wait(sheet_date_str, sheet_time_str):
 
         full_time_str = f"{date_clean} {time_clean}"
         
-        # 👇 AM/PM Logic
-        try:
-            scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %I:%M %p")
-        except ValueError:
+        # 👇 NEW: Try Multiple Date Formats (US & Indian)
+        formats_to_try = [
+            "%d/%m/%Y %I:%M %p",  # 21/12/2025 2:30 PM (Indian)
+            "%m/%d/%Y %I:%M %p",  # 12/21/2025 2:30 PM (US/Sheet Default)
+            "%d/%m/%Y %I:%M%p",   # 21/12/2025 2:30PM
+            "%m/%d/%Y %I:%M%p",   # 12/21/2025 2:30PM
+            "%d/%m/%Y %H:%M",     # 24 Hour format
+            "%Y-%m-%d %H:%M:%S"   # ISO Format
+        ]
+        
+        scheduled_dt = None
+        for fmt in formats_to_try:
             try:
-                scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %I:%M%p")
+                scheduled_dt = datetime.strptime(full_time_str, fmt)
+                break # Jo format match thay to loop stop karo
             except ValueError:
-                scheduled_dt = datetime.strptime(full_time_str, "%d/%m/%Y %H:%M")
+                continue
+                
+        if not scheduled_dt:
+            print(f"      ⚠️ Date Format Unknown: {full_time_str}")
+            return False
 
         # Time Difference
         time_diff = (scheduled_dt - ist_now).total_seconds()
         
-        print(f"      🕒 Scheduled: {scheduled_dt.strftime('%H:%M')} | Now: {ist_now.strftime('%H:%M')} | Gap: {int(time_diff)}s")
+        print(f"      🕒 Scheduled: {scheduled_dt.strftime('%d/%m %H:%M')} | Now: {ist_now.strftime('%d/%m %H:%M')} | Gap: {int(time_diff)}s")
 
         if time_diff <= 0:
             return True 
@@ -112,8 +125,8 @@ def check_time_and_wait(sheet_date_str, sheet_time_str):
             print(f"      💤 Too early. Will check later.")
             return False 
 
-    except ValueError:
-        print(f"      ⚠️ Date/Time Skipped or Invalid (Use: 20/12/2025 & 2:30 PM)")
+    except Exception as e:
+        print(f"      ⚠️ Time Check Error: {e}")
         return False 
 
 # =======================================================
