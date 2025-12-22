@@ -18,9 +18,20 @@ from google.auth.transport.requests import Request
 # 1. AUTH TOKEN (GitHub Secret)
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 2. YOUTUBE CREDENTIALS (Loaded from GitHub Secret)
+# 2. YOUTUBE CREDENTIALS (SMART LOAD FROM GITHUB SECRET)
+# 👇 આ લોજિક Secret માંથી ડેટા વાંચશે અને નામને કેપિટલ કરી દેશે જેથી મેચિંગ એરર ના આવે.
 YOUTUBE_CREDENTIALS_JSON = os.environ.get("YOUTUBE_CREDENTIALS")
-YOUTUBE_CONFIG = json.loads(YOUTUBE_CREDENTIALS_JSON) if YOUTUBE_CREDENTIALS_JSON else {}
+YOUTUBE_CONFIG = {}
+
+if YOUTUBE_CREDENTIALS_JSON:
+    try:
+        raw_config = json.loads(YOUTUBE_CREDENTIALS_JSON)
+        for k, v in raw_config.items():
+            # બ્રાન્ડ નેમ ને કેપિટલ કરી નાખશે
+            YOUTUBE_CONFIG[k.upper().strip()] = v 
+        print("✅ YouTube Config Loaded Securely & Normalized.")
+    except Exception as e:
+        print(f"❌ Error loading YouTube Config: {e}")
 
 # 3. BRAND DATABASE (All IDs Updated & Verified)
 BRAND_CONFIG = {
@@ -87,10 +98,10 @@ def check_time_and_wait(sheet_date_str, sheet_time_str):
 
         full_time_str = f"{date_clean} {time_clean}"
         
-        # 👇 NEW: Try Multiple Date Formats (US & Indian)
+        # 👇 UPDATED DATE PARSING LOGIC (Handles US & Indian Formats)
         formats_to_try = [
             "%d/%m/%Y %I:%M %p",  # 21/12/2025 2:30 PM (Indian)
-            "%m/%d/%Y %I:%M %p",  # 12/21/2025 2:30 PM (US/Sheet Default)
+            "%m/%d/%Y %I:%M %p",  # 12/21/2025 2:30 PM (US Style - Sheet Default)
             "%d/%m/%Y %I:%M%p",   # 21/12/2025 2:30PM
             "%m/%d/%Y %I:%M%p",   # 12/21/2025 2:30PM
             "%d/%m/%Y %H:%M",     # 24 Hour format
@@ -164,18 +175,20 @@ def get_services():
 def get_facebook_metrics(video_id):
     """Fetches Likes for FB Video"""
     try:
-        # FB needs specific permission for views, but likes work
         url = f"https://graph.facebook.com/v19.0/{video_id}?fields=likes.summary(true)&access_token={IG_ACCESS_TOKEN}"
         r = requests.get(url).json()
-        likes = r.get("likes", {}).get("summary", {}).get("total_count", 0)
-        return likes
+        return r.get("likes", {}).get("summary", {}).get("total_count", 0)
     except: return 0
 
 def get_youtube_metrics(video_id, brand_name):
     """Fetches Views and Likes for YT Video"""
     try:
-        if brand_name not in YOUTUBE_CONFIG: return 0, 0
-        creds_data = YOUTUBE_CONFIG[brand_name]
+        # 👇 KEY FIX: Use Uppercase to match normalized config
+        brand_key = brand_name.strip().upper()
+        
+        if brand_key not in YOUTUBE_CONFIG: return 0, 0
+        
+        creds_data = YOUTUBE_CONFIG[brand_key]
         creds = UserCredentials(None, refresh_token=creds_data["refresh_token"], client_id=creds_data["client_id"], client_secret=creds_data["client_secret"], token_uri="https://oauth2.googleapis.com/token")
         if not creds.valid: creds.refresh(Request())
         
@@ -296,12 +309,15 @@ def upload_to_youtube(brand_name, file_path, title, description, tags=[]):
     print(f"      🔴 YouTube Upload ({brand_name})...")
     start_time = time.time() # ⏱️ START TIMER
     
-    if brand_name not in YOUTUBE_CONFIG:
-        print(f"      ⚠️ YouTube Skipped: No Config found for {brand_name}")
+    # 👇 KEY FIX: Use Uppercase Key Matching for Secret Config
+    brand_key = brand_name.strip().upper()
+    
+    if brand_key not in YOUTUBE_CONFIG:
+        print(f"      ⚠️ YouTube Skipped: No Config found for {brand_key} (Check Secrets)")
         return False, "", 0
 
     try:
-        creds_data = YOUTUBE_CONFIG[brand_name]
+        creds_data = YOUTUBE_CONFIG[brand_key]
         creds = UserCredentials(
             None, 
             refresh_token=creds_data["refresh_token"],
