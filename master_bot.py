@@ -281,18 +281,28 @@ def start_bot():
                     
                     video_url = row.get("Video_Drive_Link", "")
                     
-                    # ✅ FETCH FULL DETAILS (Title + Desc + Caption + Hashtags)
+                    # ✅ FETCH FULL DETAILS (Title + Desc + Caption + Hashtags + LINK)
                     title = str(row.get("Title", "")).strip()
                     desc = str(row.get("Description", "")).strip()
                     caption_text = str(row.get("Caption", "")).strip()
                     hashtags = str(row.get("Hastag", "")).strip()
+                    product_link = str(row.get("Product_Link", "")).strip() # Fetch Link
                     
-                    # Construct Final Caption intelligently
-                    # It will only add parts that exist in the sheet
+                    # 🔥 SMART SALES CAPTION LOGIC
                     parts = []
-                    if title: parts.append(title)
+                    if title: parts.append(f"🔥 {title}")
+                    
+                    # Add Link (For FB mainly, visible on IG)
+                    if product_link:
+                        parts.append(f"👇 BUY HERE / ORDER NOW 👇\n{product_link}")
+                    
                     if desc: parts.append(desc)
                     if caption_text: parts.append(caption_text)
+                    
+                    # Extra Nudge for IG
+                    if "Instagram" in platform:
+                        parts.append("(Link in Bio / Copy link above)")
+                    
                     if hashtags: parts.append(f".\n{hashtags}")
                     
                     final_caption = "\n\n".join(parts)
