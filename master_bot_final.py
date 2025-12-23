@@ -18,8 +18,8 @@ from google.auth.transport.requests import Request
 # 1. AUTH TOKEN (GitHub Secret)
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 2. YOUTUBE CREDENTIALS (SMART LOAD FROM GITHUB SECRET)
-# 👇 આ લોજિક Secret માંથી ડેટા વાંચશે અને નામને કેપિટલ કરી દેશે જેથી મેચિંગ એરર ના આવે.
+# 2. YOUTUBE CREDENTIALS (SMART LOAD FROM SECRETS)
+# આ લોજિક Secret માંથી ડેટા વાંચશે અને નામને કેપિટલ કરી દેશે જેથી મેચિંગ એરર ના આવે.
 YOUTUBE_CREDENTIALS_JSON = os.environ.get("YOUTUBE_CREDENTIALS")
 YOUTUBE_CONFIG = {}
 
@@ -35,38 +35,14 @@ if YOUTUBE_CREDENTIALS_JSON:
 
 # 3. BRAND DATABASE (All IDs Updated & Verified)
 BRAND_CONFIG = {
-    "PEARL VERSE": { 
-        "ig_id": "17841478822408000", 
-        "fb_id": "927694300421135" 
-    },
-    "DIAMOND DICE": { 
-        "ig_id": "17841478369307404", 
-        "fb_id": "873607589175898" 
-    },
-    "EMERALD EDGE": { 
-        "ig_id": "17841478817585793", 
-        "fb_id": "929305353594436" 
-    },
-    "URBAN GLINT": { 
-        "ig_id": "17841479492205083", 
-        "fb_id": "892844607248221" 
-    },
-    "LUXIVIBE": { 
-        "ig_id": "17841478140648372", 
-        "fb_id": "777935382078740" 
-    },
-    "GRAND ORBIT": { 
-        "ig_id": "17841479516066757", 
-        "fb_id": "817698004771102" 
-    },
-    "OPUS ELITE": { 
-        "ig_id": "17841479493645419", 
-        "fb_id": "938320336026787" 
-    },
-    "ROYAL NEXUS": { 
-        "ig_id": "17841479056452004", 
-        "fb_id": "854486334423509" 
-    }
+    "PEARL VERSE": { "ig_id": "17841478822408000", "fb_id": "927694300421135" },
+    "DIAMOND DICE": { "ig_id": "17841478369307404", "fb_id": "873607589175898" },
+    "EMERALD EDGE": { "ig_id": "17841478817585793", "fb_id": "929305353594436" },
+    "URBAN GLINT": { "ig_id": "17841479492205083", "fb_id": "892844607248221" },
+    "LUXIVIBE": { "ig_id": "17841478140648372", "fb_id": "777935382078740" },
+    "GRAND ORBIT": { "ig_id": "17841479516066757", "fb_id": "817698004771102" },
+    "OPUS ELITE": { "ig_id": "17841479493645419", "fb_id": "938320336026787" },
+    "ROYAL NEXUS": { "ig_id": "17841479056452004", "fb_id": "854486334423509" }
 }
 
 # 4. SHEET SETTINGS
@@ -128,12 +104,11 @@ def check_time_and_wait(sheet_date_str, sheet_time_str):
         if time_diff <= 0:
             return True 
         elif 0 < time_diff <= 300:
-            print(f"      👀 TARGET LOCKED! Waiting {int(time_diff)}s to hit exact time...")
+            print(f"      👀 TARGET LOCKED! Waiting {int(time_diff)}s...")
             time.sleep(time_diff + 2) 
-            print("      🔫 BOOM! Exact Time Reached. Uploading...")
             return True
         else:
-            print(f"      💤 Too early. Will check later.")
+            print(f"      💤 Too early.")
             return False 
 
     except Exception as e:
@@ -231,49 +206,28 @@ def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
     print(f"      📸 Instagram Upload ({brand_name})...")
     start_time = time.time() # ⏱️ START TIMER
     
-    if not ig_user_id or "AHIYA" in ig_user_id: 
-        print("      ⚠️ IG ID Invalid/Missing.")
-        return False, "", 0
-    
-    domain = "https://graph.facebook.com/v19.0"
+    if not ig_user_id: return False, "", 0
     try:
-        url_init = f"{domain}/{ig_user_id}/media"
+        domain = "https://graph.facebook.com/v19.0"
+        url = f"{domain}/{ig_user_id}/media"
         params = { "upload_type": "resumable", "media_type": "REELS", "caption": caption, "access_token": IG_ACCESS_TOKEN }
-        r_init = requests.post(url_init, params=params)
-        data_init = r_init.json()
+        r = requests.post(url, params=params).json()
+        if "uri" not in r: return False, "", 0
         
-        if "id" not in data_init: return False, "", 0
-        upload_uri = data_init["uri"]
-        container_id = data_init["id"]
-
-        file_size = os.path.getsize(file_path)
         with open(file_path, "rb") as f:
-            headers = { "Authorization": f"OAuth {IG_ACCESS_TOKEN}", "offset": "0", "file_size": str(file_size) }
-            r_upload = requests.post(upload_uri, data=f, headers=headers)
+            headers = { "Authorization": f"OAuth {IG_ACCESS_TOKEN}", "offset": "0", "file_size": str(os.path.getsize(file_path)) }
+            requests.post(r["uri"], data=f, headers=headers)
         
-        if r_upload.status_code != 200: return False, "", 0
-
-        print("      ⏳ Processing IG (60s)...")
         time.sleep(60)
-        url_pub = f"{domain}/{ig_user_id}/media_publish"
-        r_pub = requests.post(url_pub, params={"creation_id": container_id, "access_token": IG_ACCESS_TOKEN})
-        data_pub = r_pub.json()
+        pub = requests.post(f"{domain}/{ig_user_id}/media_publish", params={"creation_id": r["id"], "access_token": IG_ACCESS_TOKEN}).json()
         
-        end_time = time.time() # ⏱️ END TIMER
-        duration = int(end_time - start_time)
-        
-        if "id" in data_pub:
-            # Shortcode fetch karva mate (For Link)
+        if "id" in pub:
             try:
-                r_get = requests.get(f"{domain}/{data_pub['id']}?fields=shortcode&access_token={IG_ACCESS_TOKEN}").json()
-                shortcode = r_get.get("shortcode", "")
-                link = f"https://www.instagram.com/reel/{shortcode}/" if shortcode else f"ID:{data_pub['id']}"
-            except: link = "Link Error"
-            
-            print(f"      ✅ IG Published: {data_pub['id']}")
-            return True, link, duration
-        else:
-            return False, "", 0
+                g = requests.get(f"{domain}/{pub['id']}?fields=shortcode&access_token={IG_ACCESS_TOKEN}").json()
+                link = f"https://www.instagram.com/reel/{g.get('shortcode')}/"
+                return True, link, int(time.time() - start_time)
+            except: return True, "Link Error", int(time.time() - start_time)
+        return False, "", 0
     except Exception as e:
         print(f"      ❌ IG Error: {e}")
         return False, "", 0
@@ -287,20 +241,13 @@ def upload_to_facebook(brand_name, fb_page_id, file_path, caption):
     try:
         params = { "description": caption, "access_token": IG_ACCESS_TOKEN }
         with open(file_path, "rb") as f:
-            files = {"source": f}
-            r = requests.post(url, params=params, files=files)
-        data = r.json()
+            r = requests.post(url, params=params, files={"source": f}).json()
         
-        end_time = time.time() # ⏱️ END TIMER
-        duration = int(end_time - start_time)
-
-        if "id" in data:
-            print(f"      ✅ FB Published: {data['id']}")
-            link = f"https://www.facebook.com/{fb_page_id}/videos/{data['id']}/"
-            return True, link, duration
-        else:
-            print(f"      ❌ FB Failed: {data}")
-            return False, "", 0
+        if "id" in r:
+            link = f"https://www.facebook.com/{fb_page_id}/videos/{r['id']}/"
+            return True, link, int(time.time() - start_time)
+        print(f"❌ FB Failed Details: {r}") 
+        return False, "", 0
     except Exception as e:
         print(f"      ❌ FB Exception: {e}")
         return False, "", 0
@@ -409,9 +356,9 @@ def start_bot():
             sheet_date = str(row.get("Schedule_Date", "")).strip()
             sheet_time = str(row.get("Schedule_Time", "")).strip()
             
-            print(f"\n👉 Checking Row {i}: {row.get('Title_Hook') or row.get('Title')} | Brand: {brand}")
-            
+            # This logic will upload immediately if the time has passed (Past Date)
             if check_time_and_wait(sheet_date, sheet_time):
+                print(f"\n👉 Checking Row {i}: {row.get('Title_Hook') or row.get('Title')} | Brand: {brand}")
                 
                 if brand in BRAND_CONFIG:
                     ig_id = BRAND_CONFIG[brand].get("ig_id")
@@ -425,7 +372,6 @@ def start_bot():
                     hashtags_str = row.get("Caption_Hashtags") or row.get("Hashtags", "")
                     
                     # ✅ COMBINE EVERYTHING FOR CAPTION
-                    # Format: Title + Description + Hashtags
                     caption = f"{title}\n\n{description_text}\n.\n{hashtags_str}"
                     
                     yt_tags = [tag.strip().replace("#", "") for tag in hashtags_str.split() if "#" in tag]
@@ -443,7 +389,6 @@ def start_bot():
                         elif "Facebook" in platform:
                             success, final_link, duration = upload_to_facebook(brand, fb_id, local_file, caption)
                         elif "Youtube" in platform:
-                            # YouTube will use title separately and caption as description
                             success, final_link, duration = upload_to_youtube(brand, local_file, title, caption, yt_tags)
 
                         # Cleanup
@@ -494,7 +439,6 @@ def start_bot():
                 
             # Facebook Check
             elif "facebook.com" in link:
-                # FB Video ID extraction (Simple)
                 try: vid_id = link.split("/videos/")[1].replace("/","")
                 except: vid_id = ""
                 if vid_id: likes = get_facebook_metrics(vid_id)
