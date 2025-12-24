@@ -18,8 +18,8 @@ from google.auth.transport.requests import Request
 # 1. AUTH TOKEN (GitHub Secret)
 IG_ACCESS_TOKEN = os.environ.get("FB_ACCESS_TOKEN")
 
-# 2. YOUTUBE CREDENTIALS (SMART LOAD FROM SECRETS)
-# આ લોજિક Secret માંથી ડેટા વાંચશે અને નામને કેપિટલ કરી દેશે જેથી મેચિંગ એરર ના આવે.
+# 2. YOUTUBE CREDENTIALS (SECURE LOAD FROM SECRETS)
+# ✅ આ હવે GitHub Secret માંથી ડેટા વાંચશે. Hardcode નથી.
 YOUTUBE_CREDENTIALS_JSON = os.environ.get("YOUTUBE_CREDENTIALS")
 YOUTUBE_CONFIG = {}
 
@@ -27,11 +27,13 @@ if YOUTUBE_CREDENTIALS_JSON:
     try:
         raw_config = json.loads(YOUTUBE_CREDENTIALS_JSON)
         for k, v in raw_config.items():
-            # બ્રાન્ડ નેમ ને કેપિટલ કરી નાખશે
+            # બ્રાન્ડ નેમ ને કેપિટલ કરી નાખશે જેથી મેચિંગ એરર ના આવે
             YOUTUBE_CONFIG[k.upper().strip()] = v 
-        print("✅ YouTube Config Loaded Securely & Normalized.")
+        print("✅ YouTube Config Loaded Securely from Secrets.")
     except Exception as e:
         print(f"❌ Error loading YouTube Config: {e}")
+else:
+    print("⚠️ YOUTUBE_CREDENTIALS Secret is MISSING or EMPTY.")
 
 # 3. BRAND DATABASE (All IDs Updated & Verified)
 BRAND_CONFIG = {
@@ -144,8 +146,21 @@ def get_services():
     return sheet, drive_service
 
 # =======================================================
-# 📊 NEW: ANALYTICS FUNCTIONS (VIEWS & LIKES)
+# 📊 NEW: ANALYTICS & HELPERS
 # =======================================================
+
+def get_page_access_token(page_id):
+    """
+    🔥 FIX: Exchanges User Token for Page Token to solve Permission Error
+    """
+    try:
+        url = f"https://graph.facebook.com/v19.0/{page_id}?fields=access_token&access_token={IG_ACCESS_TOKEN}"
+        r = requests.get(url).json()
+        if "access_token" in r:
+            return r["access_token"]
+        print(f"      ⚠️ Page Token Fetch Failed: {r.get('error', {}).get('message')}")
+        return IG_ACCESS_TOKEN # Fallback
+    except: return IG_ACCESS_TOKEN
 
 def get_facebook_metrics(video_id):
     """Fetches Likes for FB Video"""
@@ -206,28 +221,49 @@ def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
     print(f"      📸 Instagram Upload ({brand_name})...")
     start_time = time.time() # ⏱️ START TIMER
     
-    if not ig_user_id: return False, "", 0
-    try:
-        domain = "https://graph.facebook.com/v19.0"
-        url = f"{domain}/{ig_user_id}/media"
-        params = { "upload_type": "resumable", "media_type": "REELS", "caption": caption, "access_token": IG_ACCESS_TOKEN }
-        r = requests.post(url, params=params).json()
-        if "uri" not in r: return False, "", 0
-        
-        with open(file_path, "rb") as f:
-            headers = { "Authorization": f"OAuth {IG_ACCESS_TOKEN}", "offset": "0", "file_size": str(os.path.getsize(file_path)) }
-            requests.post(r["uri"], data=f, headers=headers)
-        
-        time.sleep(60)
-        pub = requests.post(f"{domain}/{ig_user_id}/media_publish", params={"creation_id": r["id"], "access_token": IG_ACCESS_TOKEN}).json()
-        
-        if "id" in pub:
-            try:
-                g = requests.get(f"{domain}/{pub['id']}?fields=shortcode&access_token={IG_ACCESS_TOKEN}").json()
-                link = f"https://www.instagram.com/reel/{g.get('shortcode')}/"
-                return True, link, int(time.time() - start_time)
-            except: return True, "Link Error", int(time.time() - start_time)
+    if not ig_user_id or "AHIYA" in ig_user_id: 
+        print("      ⚠️ IG ID Invalid/Missing.")
         return False, "", 0
+    
+    domain = "https://graph.facebook.com/v19.0"
+    try:
+        url_init = f"{domain}/{ig_user_id}/media"
+        params = { "upload_type": "resumable", "media_type": "REELS", "caption": caption, "access_token": IG_ACCESS_TOKEN }
+        r_init = requests.post(url_init, params=params)
+        data_init = r_init.json()
+        
+        if "id" not in data_init: return False, "", 0
+        upload_uri = data_init["uri"]
+        container_id = data_init["id"]
+
+        file_size = os.path.getsize(file_path)
+        with open(file_path, "rb") as f:
+            headers = { "Authorization": f"OAuth {IG_ACCESS_TOKEN}", "offset": "0", "file_size": str(file_size) }
+            r_upload = requests.post(upload_uri, data=f, headers=headers)
+        
+        if r_upload.status_code != 200: return False, "", 0
+
+        print("      ⏳ Processing IG (60s)...")
+        time.sleep(60)
+        url_pub = f"{domain}/{ig_user_id}/media_publish"
+        r_pub = requests.post(url_pub, params={"creation_id": container_id, "access_token": IG_ACCESS_TOKEN})
+        data_pub = r_pub.json()
+        
+        end_time = time.time() # ⏱️ END TIMER
+        duration = int(end_time - start_time)
+        
+        if "id" in data_pub:
+            # Shortcode fetch karva mate (For Link)
+            try:
+                r_get = requests.get(f"{domain}/{data_pub['id']}?fields=shortcode&access_token={IG_ACCESS_TOKEN}").json()
+                shortcode = r_get.get("shortcode", "")
+                link = f"https://www.instagram.com/reel/{shortcode}/" if shortcode else f"ID:{data_pub['id']}"
+            except: link = "Link Error"
+            
+            print(f"      ✅ IG Published: {data_pub['id']}")
+            return True, link, duration
+        else:
+            return False, "", 0
     except Exception as e:
         print(f"      ❌ IG Error: {e}")
         return False, "", 0
@@ -237,17 +273,28 @@ def upload_to_facebook(brand_name, fb_page_id, file_path, caption):
     start_time = time.time() # ⏱️ START TIMER
     
     if not fb_page_id: return False, "", 0
+    
+    # 👇 Use the Page Token fetcher
+    page_token = get_page_access_token(fb_page_id)
+    
     url = f"https://graph.facebook.com/v19.0/{fb_page_id}/videos"
     try:
-        params = { "description": caption, "access_token": IG_ACCESS_TOKEN }
+        params = { "description": caption, "access_token": page_token }
         with open(file_path, "rb") as f:
-            r = requests.post(url, params=params, files={"source": f}).json()
+            files = {"source": f}
+            r = requests.post(url, params=params, files=files)
+        data = r.json()
         
-        if "id" in r:
-            link = f"https://www.facebook.com/{fb_page_id}/videos/{r['id']}/"
-            return True, link, int(time.time() - start_time)
-        print(f"❌ FB Failed Details: {r}") 
-        return False, "", 0
+        end_time = time.time() # ⏱️ END TIMER
+        duration = int(end_time - start_time)
+
+        if "id" in data:
+            print(f"      ✅ FB Published: {data['id']}")
+            link = f"https://www.facebook.com/{fb_page_id}/videos/{data['id']}/"
+            return True, link, duration
+        else:
+            print(f"      ❌ FB Failed Details: {data}")
+            return False, "", 0
     except Exception as e:
         print(f"      ❌ FB Exception: {e}")
         return False, "", 0
@@ -389,6 +436,7 @@ def start_bot():
                         elif "Facebook" in platform:
                             success, final_link, duration = upload_to_facebook(brand, fb_id, local_file, caption)
                         elif "Youtube" in platform:
+                            # YouTube will use title separately and caption as description
                             success, final_link, duration = upload_to_youtube(brand, local_file, title, caption, yt_tags)
 
                         # Cleanup
