@@ -146,6 +146,18 @@ def get_services():
         print(f"❌ Connection Error: {e}")
         return None, None
 
+def get_page_access_token(page_id):
+    """
+    🔥 FIX: Exchanges User Token for Page Token (Fixes Permission Error)
+    """
+    try:
+        url = f"https://graph.facebook.com/v19.0/{page_id}?fields=access_token&access_token={IG_ACCESS_TOKEN}"
+        r = requests.get(url).json()
+        if "access_token" in r:
+            return r["access_token"]
+        return IG_ACCESS_TOKEN 
+    except: return IG_ACCESS_TOKEN
+
 def get_facebook_metrics(video_id):
     """Fetches Likes for FB Video"""
     try:
@@ -217,9 +229,12 @@ def upload_to_facebook(brand_name, fb_page_id, file_path, caption):
     start_t = time.time()
     if not fb_page_id: return False, "", 0
     
+    # 👇 Fix: Auto-Fetch Page Token
+    page_token = get_page_access_token(fb_page_id)
+    
     try:
         url = f"https://graph.facebook.com/v19.0/{fb_page_id}/videos"
-        params = { "description": caption, "access_token": IG_ACCESS_TOKEN }
+        params = { "description": caption, "access_token": page_token } # Uses Page Token
         with open(file_path, "rb") as f:
             r = requests.post(url, params=params, files={"source": f}).json()
         
