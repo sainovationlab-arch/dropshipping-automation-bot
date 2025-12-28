@@ -185,7 +185,7 @@ def download_video_securely(drive_service, drive_url):
     except: return None
 
 # =======================================================
-# 🔧 UPLOAD FUNCTIONS (WITH TIMER & LINK)
+# 🔧 UPLOAD FUNCTIONS (WITH TIMER, LINK & AUTO-COMMENT)
 # =======================================================
 
 def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
@@ -227,7 +227,7 @@ def upload_to_instagram_resumable(brand_name, ig_user_id, file_path, caption):
 def upload_to_facebook(brand_name, fb_page_id, file_path, caption):
     print(f"      📘 Facebook Upload ({brand_name})...")
     start_t = time.time()
-    if not fb_page_id: return False, "", 0
+    if not fb_page_id: return False, "", 0, ""
     
     # 👇 Fix: Auto-Fetch Page Token
     page_token = get_page_access_token(fb_page_id)
@@ -243,9 +243,30 @@ def upload_to_facebook(brand_name, fb_page_id, file_path, caption):
         
         if "id" in r:
             link = f"https://www.facebook.com/{fb_page_id}/videos/{r['id']}/"
-            return True, link, duration
-        return False, "", 0
-    except: return False, "", 0
+            # 🔥 NEW: Return Video ID also (for commenting)
+            return True, link, duration, r['id']
+        return False, "", 0, ""
+    except: return False, "", 0, ""
+
+def post_facebook_comment(object_id, message, page_id):
+    """
+    🔥 NEW: Posts a comment on the video with the link
+    """
+    print(f"      💬 Posting Auto-Comment on FB...")
+    page_token = get_page_access_token(page_id)
+    try:
+        url = f"https://graph.facebook.com/v19.0/{object_id}/comments"
+        params = { "message": message, "access_token": page_token }
+        r = requests.post(url, params=params).json()
+        if "id" in r:
+            print("      ✅ Comment Posted Successfully!")
+            return True
+        else:
+            print(f"      ⚠️ Comment Failed: {r}")
+            return False
+    except Exception as e:
+        print(f"      ❌ Comment Error: {e}")
+        return False
 
 # =======================================================
 # 🚀 MAIN EXECUTION (WITH FULL DATA ENTRY)
@@ -297,30 +318,35 @@ def start_bot():
                     video_url = row.get("Video_Drive_Link", "")
                     
                     # ✅ FETCH FULL DETAILS (Title + Desc + Caption + Hashtags + LINK)
-                    title = str(row.get("Title", "")).strip()
-                    desc = str(row.get("Description", "")).strip()
-                    caption_text = str(row.get("Caption", "")).strip()
+                    title = str(row.get("Title_Hook", "")).strip()
+                    desc = str(row.get("Discription", "")).strip()
                     hashtags = str(row.get("Hastag", "")).strip()
-                    product_link = str(row.get("Product_Link", "")).strip() # Fetch Link
+                    product_link = str(row.get("Product Link", "")).strip() # Fetch Link
                     
-                    # 🔥 SMART SALES CAPTION LOGIC
-                    parts = []
-                    if title: parts.append(f"🔥 {title}")
+                    # ---------------------------------------------------------
+                    # 🔥 SMART CAPTION GENERATION (DIFFERENT FOR FB & IG)
+                    # ---------------------------------------------------------
                     
-                    # Add Link (For FB mainly, visible on IG)
-                    if product_link:
-                        parts.append(f"👇 BUY HERE / ORDER NOW 👇\n{product_link}")
+                    # 1. FACEBOOK CAPTION (Direct Link Attack)
+                    fb_caption_parts = []
+                    if title: fb_caption_parts.append(f"🔥 {title}")
+                    if product_link: fb_caption_parts.append(f"🛒 SHOP HERE / BUY NOW 👇\n{product_link}")
+                    fb_caption_parts.append(f"👇 Check the Comments for Direct Link! 👇")
+                    if desc: fb_caption_parts.append(desc)
+                    if hashtags: fb_caption_parts.append(f"\n{hashtags}")
+                    final_fb_caption = "\n\n".join(fb_caption_parts)
+
+                    # 2. INSTAGRAM CAPTION (ManyChat Trigger)
+                    ig_caption_parts = []
+                    if title: ig_caption_parts.append(f"🔥 {title}")
+                    # 👇 THIS IS FOR MANYCHAT AUTOMATION 👇
+                    ig_caption_parts.append(f"👇 WANT THE LINK? 👇\n💬 Comment 'BUY' and I'll DM you the link instantly! 📩")
+                    ig_caption_parts.append(f"🔗 Or Check Link in Bio!")
+                    if desc: ig_caption_parts.append(desc)
+                    if hashtags: ig_caption_parts.append(f"\n{hashtags}")
+                    final_ig_caption = "\n\n".join(ig_caption_parts)
                     
-                    if desc: parts.append(desc)
-                    if caption_text: parts.append(caption_text)
-                    
-                    # Extra Nudge for IG
-                    if "Instagram" in platform:
-                        parts.append("(Link in Bio / Copy link above)")
-                    
-                    if hashtags: parts.append(f".\n{hashtags}")
-                    
-                    final_caption = "\n\n".join(parts)
+                    # ---------------------------------------------------------
                     
                     local_file = download_video_securely(drive_service, video_url)
                     
@@ -329,19 +355,28 @@ def start_bot():
                         final_link = ""
                         duration = 0
 
+                        # --- INSTAGRAM UPLOAD ---
                         if "Instagram" in platform:
-                            s, l, d = upload_to_instagram_resumable(brand, ig_id, local_file, final_caption)
+                            s, l, d = upload_to_instagram_resumable(brand, ig_id, local_file, final_ig_caption)
                             if s: 
                                 success = True
                                 final_link = l
                                 duration = d
                                 
+                        # --- FACEBOOK UPLOAD (WITH AUTO-COMMENT) ---
                         if "Facebook" in platform:
-                            s, l, d = upload_to_facebook(brand, fb_id, local_file, final_caption)
+                            s, l, d, vid_id = upload_to_facebook(brand, fb_id, local_file, final_fb_caption)
                             if s:
                                 success = True
                                 final_link = l # If both, FB link overwrites IG link in sheet logic
                                 duration = d
+                                
+                                # 🔥 AUTO-COMMENT FEATURE
+                                if product_link and vid_id:
+                                    print("      ⏳ Waiting 10s before commenting...")
+                                    time.sleep(10)
+                                    comment_msg = f"🛍️ Grab yours here before it's gone! 👇\n{product_link}\n\n🔥 Limited Stock!"
+                                    post_facebook_comment(vid_id, comment_msg, fb_id)
 
                         if os.path.exists(local_file): os.remove(local_file)
 
