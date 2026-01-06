@@ -269,12 +269,117 @@ def post_facebook_comment(object_id, message, page_id):
         return False
 
 # =======================================================
-# 🚀 MAIN EXECUTION (WITH FULL DATA ENTRY)
+# 🧠 SMART INSTAGRAM AUTO-DM (ADDED NEW FEATURE)
+# =======================================================
+
+def run_instagram_auto_dm(sheet):
+    print("\n🤖 === STARTING SMART DM CHECK (Matching Products - Last 50 Posts) ===") # Limit 50
+    
+    # 1. શીટમાંથી પ્રોડક્ટ લિંકનો ડેટાબેઝ બનાવો
+    try:
+        all_records = sheet.get_all_records()
+        product_map = {} 
+        
+        for row in all_records:
+            # Sheet columns match your sheet (Link, Product Link)
+            uploaded_link = str(row.get("Link", "")).strip()
+            
+            # Handle "Product Link" (Space) or "Product_Link" (Underscore)
+            buying_link = str(row.get("Product Link", "")).strip()
+            if not buying_link:
+                buying_link = str(row.get("Product_Link", "")).strip()
+
+            # Mapping
+            if uploaded_link and buying_link and "instagram.com" in uploaded_link:
+                try:
+                    parts = uploaded_link.split("/reel/")
+                    if len(parts) > 1:
+                        shortcode = parts[1].split("/")[0]
+                        product_map[shortcode] = buying_link
+                except:
+                    pass
+                    
+        print(f"   📊 Loaded {len(product_map)} products from sheet.")
+        
+    except Exception as e:
+        print(f"   ⚠️ Sheet Read Error: {e}")
+        return
+
+    # 2. લોગ બુક તૈયાર કરો
+    try:
+        log_sheet = sheet.worksheet("DM_Logs")
+    except:
+        log_sheet = sheet.add_worksheet(title="DM_Logs", rows="2000", cols="4")
+        log_sheet.append_row(["Comment_ID", "User", "Message_Sent", "Time"])
+    
+    replied_ids = log_sheet.col_values(1)
+    keywords = ["BUY", "LINK", "SHOP", "PRICE", "ORDER", "WANT", "PP", "INTERESTED"]
+    default_link = "https://solanki-art.myshopify.com"
+
+    # 3. દરેક બ્રાન્ડ સ્કેન કરો (Limit 50 - Safe High Limit)
+    for brand, config in BRAND_CONFIG.items():
+        ig_id = config.get("ig_id")
+        if not ig_id: continue
+        
+        print(f"   🔍 Scanning {brand} (Limit 50)...")
+        
+        # limit=50 here
+        url = f"https://graph.facebook.com/v19.0/{ig_id}/media?fields=shortcode,comments{{text,username,id}}&limit=50&access_token={IG_ACCESS_TOKEN}"
+        
+        try:
+            r = requests.get(url).json()
+            if "data" not in r: continue
+            
+            new_replies = []
+            
+            for media in r["data"]:
+                media_shortcode = media.get("shortcode")
+                final_link = product_map.get(media_shortcode, default_link)
+                
+                if "comments" in media:
+                    for comment in media["comments"]["data"]:
+                        c_id = comment["id"]
+                        c_text = comment["text"].upper()
+                        c_user = comment.get("username", "Unknown")
+                        
+                        if any(k in c_text for k in keywords) and c_id not in replied_ids:
+                            print(f"      💡 {c_user} wants {media_shortcode}. Sending specific link...")
+                            
+                            # --- PRIVATE REPLY ---
+                            reply_url = f"https://graph.facebook.com/v19.0/{ig_id}/messages"
+                            payload = {
+                                "recipient": {"comment_id": c_id},
+                                "message": {"text": f"Hey {c_user}! 👋 Here is the link you asked for: {final_link}"}
+                            }
+                            headers = {"Authorization": f"OAuth {IG_ACCESS_TOKEN}"}
+                            
+                            send = requests.post(reply_url, json=payload, headers=headers).json()
+                            
+                            if "recipient_id" in send:
+                                print(f"      ✅ DM SENT!")
+                                new_replies.append([c_id, c_user, "Sent", str(datetime.now())])
+                                replied_ids.append(c_id)
+            
+            if new_replies:
+                for row in new_replies:
+                    log_sheet.append_row(row)
+                    time.sleep(1)
+                    
+        except Exception as e:
+            print(f"      ⚠️ Error in {brand}: {e}")
+
+    print("🤖 === SMART DM FINISHED ===\n")
+
+# =======================================================
+# 🚀 MAIN EXECUTION (UPDATED WITH SMART STRATEGY)
 # =======================================================
 
 def start_bot():
     print("-" * 50)
-    print(f"⏰ DROPSHIPPING SUPER-BOT STARTED...")
+    print(f"⏰ DROPSHIPPING SUPER-BOT STARTED (Smart Caption + Auto DM)...")
+    
+    # 👇 MAIN STORE LINK (For Facebook)
+    MAIN_STORE_URL = "https://solanki-art.myshopify.com"
     
     sheet, drive_service = get_services()
     if not sheet: return
@@ -317,34 +422,35 @@ def start_bot():
                     
                     video_url = row.get("Video_Drive_Link", "")
                     
-                    # ✅ FETCH FULL DETAILS (Title + Desc + Caption + Hashtags + LINK)
+                    # ✅ FETCH FULL DETAILS
                     title = str(row.get("Title_Hook", "")).strip()
                     desc = str(row.get("Discription", "")).strip()
                     hashtags = str(row.get("Hastag", "")).strip()
-                    product_link = str(row.get("Product Link", "")).strip() # Fetch Link
+                    
+                    # Fetch Link (Try both spellings)
+                    product_link = str(row.get("Product Link", "")).strip()
+                    if not product_link:
+                        product_link = str(row.get("Product_Link", "")).strip()
                     
                     # ---------------------------------------------------------
-                    # 🔥 SMART CAPTION GENERATION (DIFFERENT FOR FB & IG)
+                    # 🔥 SMART CAPTION LOGIC (NEW STRATEGY)
                     # ---------------------------------------------------------
                     
-                    # 1. FACEBOOK CAPTION (Direct Link Attack)
-                    fb_caption_parts = []
-                    if title: fb_caption_parts.append(f"🔥 {title}")
-                    if product_link: fb_caption_parts.append(f"🛒 SHOP HERE / BUY NOW 👇\n{product_link}")
-                    fb_caption_parts.append(f"👇 Check the Comments for Direct Link! 👇")
-                    if desc: fb_caption_parts.append(desc)
-                    if hashtags: fb_caption_parts.append(f"\n{hashtags}")
-                    final_fb_caption = "\n\n".join(fb_caption_parts)
+                    # 1. FACEBOOK CAPTION (Direct Link + Main Link)
+                    # Strategy: Specific Link + Main Store Link
+                    fb_caption = f"""{title}
 
-                    # 2. INSTAGRAM CAPTION (ManyChat Trigger)
-                    ig_caption_parts = []
-                    if title: ig_caption_parts.append(f"🔥 {title}")
-                    # 👇 THIS IS FOR MANYCHAT AUTOMATION 👇
-                    ig_caption_parts.append(f"👇 WANT THE LINK? 👇\n💬 Comment 'BUY' and I'll DM you the link instantly! 📩")
-                    ig_caption_parts.append(f"🔗 Or Check Link in Bio!")
-                    if desc: ig_caption_parts.append(desc)
-                    if hashtags: ig_caption_parts.append(f"\n{hashtags}")
-                    final_ig_caption = "\n\n".join(ig_caption_parts)
+🛒 ORDER HERE: {product_link}
+
+🔥 Full Store: {MAIN_STORE_URL}
+
+{desc}
+.
+{hashtags}"""
+
+                    # 2. INSTAGRAM CAPTION (Short + Clean)
+                    # Strategy: 2-Line Hook. No Link.
+                    ig_caption = f"{title} 🔥\n💬 Comment 'BUY' for Link! 🔗\n.\n{hashtags}"
                     
                     # ---------------------------------------------------------
                     
@@ -355,23 +461,23 @@ def start_bot():
                         final_link = ""
                         duration = 0
 
-                        # --- INSTAGRAM UPLOAD ---
+                        # --- INSTAGRAM UPLOAD (Short Caption) ---
                         if "Instagram" in platform:
-                            s, l, d = upload_to_instagram_resumable(brand, ig_id, local_file, final_ig_caption)
+                            s, l, d = upload_to_instagram_resumable(brand, ig_id, local_file, ig_caption)
                             if s: 
                                 success = True
                                 final_link = l
                                 duration = d
                                 
-                        # --- FACEBOOK UPLOAD (WITH AUTO-COMMENT) ---
+                        # --- FACEBOOK UPLOAD (Dual Link Caption + Auto Comment) ---
                         if "Facebook" in platform:
-                            s, l, d, vid_id = upload_to_facebook(brand, fb_id, local_file, final_fb_caption)
+                            s, l, d, vid_id = upload_to_facebook(brand, fb_id, local_file, fb_caption)
                             if s:
                                 success = True
-                                final_link = l # If both, FB link overwrites IG link in sheet logic
+                                final_link = l 
                                 duration = d
                                 
-                                # 🔥 AUTO-COMMENT FEATURE
+                                # 🔥 AUTO-COMMENT FEATURE (EXTRA BOOST)
                                 if product_link and vid_id:
                                     print("      ⏳ Waiting 10s before commenting...")
                                     time.sleep(10)
@@ -421,6 +527,9 @@ def start_bot():
         print("💤 No new posts. Analytics updated.")
     else:
         print(f"🎉 Processed {count} videos.")
+
+    # 🔥 RUN AUTO-DM BOT (INSTAGRAM ONLY)
+    run_instagram_auto_dm(sheet)
 
 if __name__ == "__main__":
     start_bot()
