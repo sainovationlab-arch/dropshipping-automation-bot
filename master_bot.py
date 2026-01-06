@@ -269,7 +269,7 @@ def post_facebook_comment(object_id, message, page_id):
         return False
 
 # =======================================================
-# 🧠 SMART INSTAGRAM AUTO-DM (MATCHING PRODUCTS)
+# 🧠 SMART INSTAGRAM AUTO-DM (FIXED: SPREADSHEET ERROR)
 # =======================================================
 
 def run_instagram_auto_dm(sheet):
@@ -299,11 +299,13 @@ def run_instagram_auto_dm(sheet):
         print(f"   ⚠️ Sheet Read Error: {e}")
         return
 
-    # 2. Log Book
+    # 2. Log Book (FIXED: Added .spreadsheet)
     try:
-        log_sheet = sheet.worksheet("DM_Logs")
+        # 👇 HERE WAS THE ERROR: Now we use sheet.spreadsheet to access other tabs
+        log_sheet = sheet.spreadsheet.worksheet("DM_Logs")
     except:
-        log_sheet = sheet.add_worksheet(title="DM_Logs", rows="2000", cols="4")
+        # Create if not exists (using spreadsheet object)
+        log_sheet = sheet.spreadsheet.add_worksheet(title="DM_Logs", rows="2000", cols="4")
         log_sheet.append_row(["Comment_ID", "User", "Message_Sent", "Time"])
     
     replied_ids = log_sheet.col_values(1)
